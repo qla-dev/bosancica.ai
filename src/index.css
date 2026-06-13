@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@400;500;600;750&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cinzel", "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-gold: #C5A059;
+  --color-gold-hover: #D4B069;
+  --color-brand-dark: #0A0A0A;
+  --color-brand-border: #2A2A2A;
+  --color-orange-accent: #FF5F1F;
+}
+
+/* Custom modern scrollbars inside retro components */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0c0a09;
+}
+::-webkit-scrollbar-thumb {
+  background: #292524;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #44403c;
+}
+
