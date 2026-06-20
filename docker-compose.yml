@@ -1,0 +1,19 @@
+version: '3.8'
+
+name: bosancica
+
+networks:
+  bosancica_network:
+    external: true
+
+services:
+  bosancica-frontend:
+    image: kulasinn/bosancica-frontend:latest
+    build: .
+    container_name: bosancica-frontend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    networks:
+      - bosancica_network
