@@ -1,5 +1,3 @@
-version: '3.8'
-
 name: bosancica
 
 networks:
@@ -8,7 +6,7 @@ networks:
 
 services:
   bosancica-frontend:
-    image: kulasinn/bosancica-frontend:latest
+    image: kulasinn/bosancica-ai:bosancica-frontend
     build: .
     container_name: bosancica-frontend
     ports:
