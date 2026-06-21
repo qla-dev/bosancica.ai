@@ -4,6 +4,7 @@ export interface BosancicaLetter {
   id: string;
   charName: string; // e.g. "Az", "Buki", "Vedi"
   latinChar: string; // e.g. "A", "B", "V"
+  fontInput?: string; // Cyrillic code point expected by the historical BoSanko2 font
   svgPath: string; // custom SVG path representing the letter shape
   description: string; // historical description or sound representation
   variants: string[]; // alternative shapes or notes

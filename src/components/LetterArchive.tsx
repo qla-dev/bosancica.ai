@@ -1,15 +1,46 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { BOSANCICA_LETTERS } from '../data';
 import { BosancicaLetter, ValidationSample } from '../types';
-import { Award, PenTool, CheckCircle, Info, RefreshCw, Star, Trash2 } from 'lucide-react';
+import { Award, PenTool, CheckCircle, Link2, Plus, RefreshCw, Star, Trash2 } from 'lucide-react';
+import { toBosancicaFontInput } from '../bosancica';
 
 interface LetterArchiveProps {
   onAddTrainingSample: (sample: ValidationSample) => void;
 }
 
+const getLetterGlyph = (letter: BosancicaLetter) =>
+  letter.fontInput ?? toBosancicaFontInput(letter.latinChar.split(/[ /]/)[0]);
+
+const SIMILAR_LETTER_GROUPS = [
+  ['C', 'Č', 'Ć'],
+  ['D', 'Đ', 'DŽ'],
+  ['E', 'I', 'JE'],
+  ['U', 'JU'],
+  ['L', 'LJ'],
+  ['N', 'NJ'],
+  ['O', 'OT'],
+  ['S', 'Š', 'ŠT / ŠĆ / Ć'],
+  ['Z', 'Ž'],
+];
+
+const createSimilarLetterMap = () => {
+  const result: Record<string, string[]> = Object.fromEntries(BOSANCICA_LETTERS.map((letter) => [letter.id, []]));
+  SIMILAR_LETTER_GROUPS.forEach((group) => {
+    const letters = group
+      .map((label) => BOSANCICA_LETTERS.find((letter) => letter.latinChar === label))
+      .filter((letter): letter is BosancicaLetter => Boolean(letter));
+    letters.forEach((letter) => {
+      result[letter.id] = letters.filter((item) => item.id !== letter.id).map((item) => item.id);
+    });
+  });
+  return result;
+};
+
 export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProps) {
   const [selectedLetter, setSelectedLetter] = useState<BosancicaLetter>(BOSANCICA_LETTERS[0]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [similarLetters, setSimilarLetters] = useState<Record<string, string[]>>(createSimilarLetterMap);
+  const [newAssociationId, setNewAssociationId] = useState('');
 
   // Drawing Canvas State
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -29,6 +60,7 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
         // Clear background with rich brand-dark
         ctx.fillStyle = '#0A0A0A';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        setHasDrawnContent(false);
       }
     }
   }, [selectedLetter]);
@@ -65,8 +97,8 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
     }
 
     const rect = canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    const x = (clientX - rect.left) * (canvas.width / rect.width);
+    const y = (clientY - rect.top) * (canvas.height / rect.height);
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -111,20 +143,25 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
     }, 5000);
   };
 
+  const addSimilarLetter = () => {
+    if (!newAssociationId || newAssociationId === selectedLetter.id) return;
+    setSimilarLetters((current) => ({
+      ...current,
+      [selectedLetter.id]: Array.from(new Set([...(current[selectedLetter.id] ?? []), newAssociationId])),
+      [newAssociationId]: Array.from(new Set([...(current[newAssociationId] ?? []), selectedLetter.id])),
+    }));
+    setNewAssociationId('');
+  };
+
+  const selectedSimilarLetters = (similarLetters[selectedLetter.id] ?? [])
+    .map((id) => BOSANCICA_LETTERS.find((letter) => letter.id === id))
+    .filter((letter): letter is BosancicaLetter => Boolean(letter));
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 text-stone-200">
       {/* LEFT COLUMN: Alphabet grid of letters */}
       <div className="lg:col-span-7 flex flex-col gap-6">
         <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md shadow-2xl">
-          <div className="mb-4">
-            <h3 className="text-lg font-serif font-semibold text-stone-100">
-              Arhiv i Abecednik Bosančice
-            </h3>
-            <p className="text-xs text-stone-400 mt-0.5">
-              Odaberite slovo za prikaz klesanih karakteristika i predaju unosa
-            </p>
-          </div>
-
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
             {BOSANCICA_LETTERS.map((letter) => (
               <button
@@ -141,16 +178,12 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                   <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#C5A059]"></div>
                 )}
 
-                {/* Simulated old paper background subtle texture for icon box */}
-                <div className="w-12 h-12 flex items-center justify-center rounded bg-black border border-[#2A2A2A] group-hover:border-[#C5A059]/35 transition-colors">
-                  <svg
-                    viewBox="0 0 100 100"
-                    className={`w-8 h-8 stroke-2 fill-none transition-colors duration-300 ${
-                      selectedLetter.id === letter.id ? 'stroke-[#C5A059]' : 'stroke-stone-500 group-hover:stroke-stone-300'
-                    }`}
-                  >
-                    <path d={letter.svgPath} />
-                  </svg>
+                <div className="w-16 h-16 flex items-center justify-center rounded-lg bg-black border border-[#2A2A2A] group-hover:border-[#C5A059]/35 transition-colors overflow-hidden">
+                  <span className={`font-bosanko text-[48px] leading-none transition-colors duration-300 ${
+                    selectedLetter.id === letter.id ? 'text-[#C5A059]' : 'text-stone-500 group-hover:text-stone-300'
+                  }`}>
+                    {getLetterGlyph(letter)}
+                  </span>
                 </div>
 
                 <div className="text-center mt-3">
@@ -159,6 +192,9 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                   </span>
                   <span className="text-[10px] text-stone-500 font-mono">
                     Lat: {letter.latinChar}
+                  </span>
+                  <span className="mt-1 block text-[8px] text-[#8F7545] font-mono">
+                    {letter.examplesCount} primjeraka
                   </span>
                 </div>
               </button>
@@ -195,10 +231,10 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                 {selectedLetter.charName} (latinični znak "{selectedLetter.latinChar}")
               </h3>
             </div>
-            <div className="w-14 h-14 bg-black rounded border border-[#2A2A2A] flex items-center justify-center">
-              <svg viewBox="0 0 100 100" className="w-9 h-9 stroke-[#C5A059] stroke-2 fill-none">
-                <path d={selectedLetter.svgPath} />
-              </svg>
+            <div className="w-20 h-20 bg-black rounded-lg border border-[#2A2A2A] flex items-center justify-center overflow-hidden">
+              <span className="font-bosanko text-[60px] leading-none text-[#C5A059]">
+                {getLetterGlyph(selectedLetter)}
+              </span>
             </div>
           </div>
 
@@ -207,6 +243,10 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
           </p>
 
           <div className="flex flex-wrap gap-2 mb-6">
+            <span className="px-2.5 py-1 rounded bg-[#C5A059]/10 border border-[#C5A059]/25 text-[10px] text-[#D4B069] flex items-center gap-1 font-mono">
+              <Award className="w-3 h-3" />
+              Trenirano na {selectedLetter.examplesCount} primjeraka
+            </span>
             {selectedLetter.variants.map((v, i) => (
               <span
                 key={i}
@@ -216,6 +256,58 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                 {v}
               </span>
             ))}
+          </div>
+
+          <div className="mb-6 p-3.5 rounded-xl border border-[#2A2A2A] bg-black/35">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-[#C5A059]" />
+                <div>
+                  <strong className="block text-xs text-stone-200">Slična slova</strong>
+                  <span className="block text-[9px] text-stone-500 mt-0.5">Povezani oblici za {selectedLetter.latinChar}</span>
+                </div>
+              </div>
+              <span className="text-[9px] font-mono text-[#A88950]">{selectedSimilarLetters.length} veza</span>
+            </div>
+
+            {selectedSimilarLetters.length > 0 ? (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {selectedSimilarLetters.map((letter) => (
+                  <button
+                    key={letter.id}
+                    type="button"
+                    onClick={() => setSelectedLetter(letter)}
+                    className="h-12 px-2.5 flex items-center gap-2 rounded-lg border border-[#39352E] bg-[#151513] hover:border-[#C5A059]/60 transition-colors"
+                  >
+                    <span className="font-bosanko text-3xl leading-none text-[#C5A059]">{getLetterGlyph(letter)}</span>
+                    <span className="text-[10px] font-mono text-stone-400">{letter.latinChar}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="mb-3 text-[10px] text-stone-600">Ovo slovo još nema pridružene slične oblike.</p>
+            )}
+
+            <div className="flex gap-2">
+              <select
+                value={newAssociationId}
+                onChange={(event) => setNewAssociationId(event.target.value)}
+                className="min-w-0 flex-1 h-9 px-2.5 rounded-lg border border-[#34312C] bg-[#11110F] text-[10px] text-stone-300 outline-none focus:border-[#806A43]"
+              >
+                <option value="">Pridruži novo slovo…</option>
+                {BOSANCICA_LETTERS
+                  .filter((letter) => letter.id !== selectedLetter.id && !selectedSimilarLetters.some((item) => item.id === letter.id))
+                  .map((letter) => <option key={letter.id} value={letter.id}>{letter.latinChar}</option>)}
+              </select>
+              <button
+                type="button"
+                onClick={addSimilarLetter}
+                disabled={!newAssociationId}
+                className="h-9 px-3 flex items-center gap-1.5 rounded-lg bg-[#C5A059] text-black text-[10px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-3.5 h-3.5" /> Dodaj
+              </button>
+            </div>
           </div>
 
           {/* DYNAMIC DRAWING CANVAS */}
@@ -240,20 +332,27 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
             )}
 
             <div className="p-4 flex flex-col items-center">
-              <canvas
-                id="letter-sketch-pad"
-                ref={canvasRef}
-                width={300}
-                height={200}
-                onMouseDown={startDrawing}
-                onMouseUp={endDrawing}
-                onMouseLeave={endDrawing}
-                onMouseMove={draw}
-                onTouchStart={startDrawing}
-                onTouchEnd={endDrawing}
-                onTouchMove={draw}
-                className="border border-[#2A2A2A] rounded cursor-crosshair bg-black max-w-full touch-none"
-              />
+              <div className="relative max-w-full">
+                <canvas
+                  id="letter-sketch-pad"
+                  ref={canvasRef}
+                  width={300}
+                  height={200}
+                  onMouseDown={startDrawing}
+                  onMouseUp={endDrawing}
+                  onMouseLeave={endDrawing}
+                  onMouseMove={draw}
+                  onTouchStart={startDrawing}
+                  onTouchEnd={endDrawing}
+                  onTouchMove={draw}
+                  className="border border-[#2A2A2A] rounded cursor-crosshair bg-black max-w-full touch-none"
+                />
+                {!hasDrawnContent && (
+                  <span className="absolute inset-0 grid place-items-center pointer-events-none font-bosanko text-[158px] leading-none text-[#C5A059]/18 overflow-hidden">
+                    {getLetterGlyph(selectedLetter)}
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-stone-500 mt-2 font-sans italic text-center">
                 Pomoću miša ili prsta nacrtajte stilizovanu varijantu slova iznad
               </p>

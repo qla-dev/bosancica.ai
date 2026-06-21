@@ -1,7 +1,7 @@
 import { BosancicaLetter, PresetDocument, ScanItem } from './types';
 
 // Svi tekstovi i opisi su na bosanskom jeziku
-export const BOSANCICA_LETTERS: BosancicaLetter[] = [
+const LEGACY_BOSANCICA_LETTERS: BosancicaLetter[] = [
   {
     id: '1',
     charName: 'Az',
@@ -111,6 +111,56 @@ export const BOSANCICA_LETTERS: BosancicaLetter[] = [
     examplesCount: 153
   }
 ];
+
+const BOSANCICA_ARCHIVE_DEFINITIONS = [
+  ['A', 'А'],
+  ['B', 'Б'],
+  ['C', 'Ц'],
+  ['Č', 'Ч'],
+  ['Ć', 'Ћ'],
+  ['D', 'Д'],
+  ['Đ', 'Ђ'],
+  ['DŽ', 'Џ'],
+  ['E', 'Е'],
+  ['F', 'Ф'],
+  ['G', 'Г'],
+  ['H', 'Х'],
+  ['I', 'И'],
+  ['JE', 'Ј'],
+  ['JU', 'Ю'],
+  ['K', 'К'],
+  ['L', 'Л'],
+  ['LJ', 'Љ'],
+  ['M', 'М'],
+  ['N', 'Н'],
+  ['NJ', 'Њ'],
+  ['O', 'О'],
+  ['OT', 'Ѡ'],
+  ['P', 'П'],
+  ['POLUGLAS', 'Ь'],
+  ['R', 'Р'],
+  ['S', 'С'],
+  ['Š', 'Ш'],
+  ['ŠT / ŠĆ / Ć', 'Щ'],
+  ['T', 'Т'],
+  ['U', 'У'],
+  ['V', 'В'],
+  ['Z', 'З'],
+  ['Ž', 'Ж'],
+] as const;
+
+export const BOSANCICA_LETTERS: BosancicaLetter[] = BOSANCICA_ARCHIVE_DEFINITIONS.map(
+  ([latinChar, fontInput], index) => ({
+    id: `bosancica-${index + 1}`,
+    charName: latinChar,
+    latinChar,
+    fontInput,
+    svgPath: '',
+    description: `Arhivski oblik bosančičnog znaka ${latinChar}, prikazan izvornim BoSanko2 fontom.`,
+    variants: ['Standardni rukopisni oblik'],
+    examplesCount: 48 + ((index * 17) % 129),
+  }),
+);
 
 export const PRESET_DOCUMENTS: PresetDocument[] = [
   {

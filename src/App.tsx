@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { DragEvent, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Archive,
@@ -7,108 +7,79 @@ import {
   Check,
   ChevronDown,
   History,
-  Landmark,
+  FileImage,
+  Gauge,
   Menu,
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
-  PenTool,
   Plus,
   ScanLine,
-  Send,
   Settings,
   ShieldCheck,
-  Sparkles,
+  Server,
   Upload,
   UserRound,
   X,
 } from 'lucide-react';
-import { MOCK_HISTORY, MOCK_VALIDATION_SAMPLES } from './data';
+import { MOCK_HISTORY, MOCK_VALIDATION_SAMPLES, PRESET_DOCUMENTS } from './data';
 import { ScanItem, ValidationSample } from './types';
 import ScanWorkflow from './components/ScanWorkflow';
 import LetterArchive from './components/LetterArchive';
 import TrainerDashboard from './components/TrainerDashboard';
 
 type Workspace = 'home' | 'scanner' | 'archive' | 'trainer';
-type PromptMode = Exclude<Workspace, 'home'>;
+type RecentDocument = {
+  id: string;
+  title: string;
+  presetId?: string;
+  files?: File[];
+};
 
 const workspaceMeta: Record<Workspace, { label: string; eyebrow: string }> = {
-  home: { label: 'Novi razgovor', eyebrow: 'Bosančica AI' },
+  home: { label: 'Novi dokument', eyebrow: 'Bosančica AI' },
   scanner: { label: 'Skeniranje i transkripcija', eyebrow: 'OCR laboratorija' },
   archive: { label: 'Arhiv slova', eyebrow: 'Digitalna zbirka' },
   trainer: { label: 'AI trener', eyebrow: 'Nadzor modela' },
 };
 
-const modeOptions: Array<{
-  id: PromptMode;
+const modelOptions: Array<{
+  id: string;
   label: string;
   description: string;
-  icon: typeof ScanLine;
+  badge?: string;
 }> = [
   {
-    id: 'scanner',
-    label: 'Transkripcija dokumenta',
-    description: 'Prepoznaj bosančicu sa slike',
-    icon: ScanLine,
-  },
-  {
-    id: 'archive',
-    label: 'Istraživanje arhiva',
-    description: 'Upoznaj slova i njihove varijante',
-    icon: BookOpen,
-  },
-  {
-    id: 'trainer',
-    label: 'Treniranje modela',
-    description: 'Pregledaj uzorke zajednice',
-    icon: ShieldCheck,
-  },
-];
-
-const starterPrompts: Array<{ title: string; text: string; mode: PromptMode; icon: typeof ScanLine }> = [
-  {
-    title: 'Prepiši stari dokument',
-    text: 'Želim transkribovati fotografiju starog dokumenta.',
-    mode: 'scanner',
-    icon: ScanLine,
-  },
-  {
-    title: 'Istraži jedno slovo',
-    text: 'Pokaži mi karakteristična slova bosančice i njihove varijante.',
-    mode: 'archive',
-    icon: PenTool,
-  },
-  {
-    title: 'Povelja bana Kulina',
-    text: 'Želim istražiti Povelju bana Kulina iz 1189. godine.',
-    mode: 'scanner',
-    icon: Landmark,
-  },
-  {
-    title: 'Pomozi unaprijediti model',
-    text: 'Otvori uzorke koji čekaju stručnu provjeru.',
-    mode: 'trainer',
-    icon: Sparkles,
+    id: 'kraken-bvision-local',
+    label: 'Kraken BVision OCR',
+    description: 'qla.dev local server',
+    badge: 'Lokalno',
   },
 ];
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>('home');
-  const [promptMode, setPromptMode] = useState<PromptMode>('scanner');
-  const [prompt, setPrompt] = useState('');
+  const [selectedModel, setSelectedModel] = useState(modelOptions[0].id);
+  const [pendingUploads, setPendingUploads] = useState<File[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [documentSelectionNonce, setDocumentSelectionNonce] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
   const [validationQueue, setValidationQueue] = useState<ValidationSample[]>(MOCK_VALIDATION_SAMPLES);
-  const [recentSessions, setRecentSessions] = useState<string[]>([
-    'Povelja bana Kulina',
-    'Natpis sa stećka Radoja',
-    'Humačka ploča',
-  ]);
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(
+    PRESET_DOCUMENTS.map((document) => ({
+      id: document.id,
+      title: document.title,
+      presetId: document.id,
+    })),
+  );
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const homeFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
@@ -127,27 +98,37 @@ export default function App() {
   };
 
   const startNewConversation = () => {
-    setPrompt('');
-    setPromptMode('scanner');
+    setPendingUploads([]);
+    setSelectedPresetId(null);
     navigate('home');
   };
 
-  const launchPrompt = (event?: FormEvent) => {
-    event?.preventDefault();
-    const cleanPrompt = prompt.trim();
-    if (cleanPrompt) {
-      const title = cleanPrompt.length > 34 ? `${cleanPrompt.slice(0, 34)}…` : cleanPrompt;
-      setRecentSessions((current) => [title, ...current.filter((item) => item !== title)].slice(0, 6));
-    }
-    navigate(promptMode);
+  const openUploadedDocuments = (files: File[]) => {
+    const images = files.filter((file) => file.type.startsWith('image/'));
+    if (!images.length) return;
+    const title = images.length === 1 ? images[0].name : `${images[0].name} + ${images.length - 1}`;
+    const item: RecentDocument = { id: `upload-${Date.now()}`, title, files: images };
+    setPendingUploads(images);
+    setSelectedPresetId(null);
+    setDocumentSelectionNonce((value) => value + 1);
+    setRecentDocuments((current) => [item, ...current].slice(0, 7));
+    navigate('scanner');
   };
 
-  const chooseStarter = (text: string, mode: PromptMode) => {
-    setPrompt(text);
-    setPromptMode(mode);
+  const openRecentDocument = (document: RecentDocument) => {
+    setPendingUploads([...(document.files ?? [])]);
+    setSelectedPresetId(document.presetId ?? null);
+    setDocumentSelectionNonce((value) => value + 1);
+    navigate('scanner');
   };
 
-  const selectedMode = modeOptions.find((option) => option.id === promptMode) ?? modeOptions[0];
+  const handleDrop = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    openUploadedDocuments(Array.from(event.dataTransfer.files));
+  };
+
+  const activeModel = modelOptions.find((option) => option.id === selectedModel) ?? modelOptions[0];
 
   return (
     <div className="app-shell">
@@ -197,7 +178,7 @@ export default function App() {
 
         <button className="new-chat-button" onClick={startNewConversation}>
           <Plus size={18} />
-          {!sidebarCollapsed && <span>Novi razgovor</span>}
+          {!sidebarCollapsed && <span>Novi dokument</span>}
         </button>
 
         <nav className="sidebar__nav" aria-label="Glavna navigacija">
@@ -226,10 +207,10 @@ export default function App() {
               <span>Nedavno</span>
               <History size={13} />
             </div>
-            {recentSessions.map((session, index) => (
-              <button key={`${session}-${index}`} onClick={() => navigate(index === 2 ? 'archive' : 'scanner')}>
+            {recentDocuments.map((document) => (
+              <button key={document.id} onClick={() => openRecentDocument(document)}>
                 <MessageSquareText size={15} />
-                <span>{session}</span>
+                <span>{document.title}</span>
               </button>
             ))}
           </div>
@@ -288,108 +269,102 @@ export default function App() {
             {workspace === 'home' ? (
               <motion.section
                 key="home"
-                className="welcome"
+                className="upload-home"
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.28 }}
               >
-                <div className="welcome__hero">
-                  <div className="welcome__seal"><span>Б</span></div>
-                  <p>AI LABORATORIJA ZA KULTURNU BAŠTINU</p>
-                  <h1>Šta ćemo danas<br /><em>otkriti?</em></h1>
-                  <span className="welcome__lead">
-                    Transkribujte rukopis, istražite starobosanska slova ili pomozite modelu da nauči novi trag prošlosti.
-                  </span>
-                </div>
-
-                <form className="prompt-box" onSubmit={launchPrompt}>
-                  <textarea
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        launchPrompt();
-                      }
+                <div className="upload-panel">
+                  <input
+                    ref={homeFileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      if (event.target.files) openUploadedDocuments(Array.from(event.target.files));
                     }}
-                    placeholder="Pitaj o dokumentu, slovu ili historijskom natpisu…"
-                    rows={2}
-                    aria-label="Upit"
                   />
-                  <div className="prompt-box__actions">
+                  <button
+                    type="button"
+                    className={`upload-dropzone ${isDragging ? 'is-dragging' : ''}`}
+                    onClick={() => homeFileInputRef.current?.click()}
+                    onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                  >
+                    <span className="upload-dropzone__icon"><FileImage size={30} /></span>
+                    <strong>Prevucite dokumente ovdje</strong>
+                    <small>jedna fotografija ili cijeli niz stranica</small>
+                    <em><Upload size={15} /> Odaberi slike</em>
+                    <span className="upload-dropzone__formats">PNG, JPG ili WEBP · multiple upload</span>
+                  </button>
+
+                  <div className="model-row">
+                    <div>
+                      <strong>Model za obradu</strong>
+                      <small>Odaberite AI model koji će čitati dokument</small>
+                    </div>
                     <div className="mode-picker" ref={modeMenuRef}>
                       <AnimatePresence>
                         {modeMenuOpen && (
                           <motion.div
-                            className="mode-menu"
+                            className="mode-menu model-menu"
                             initial={{ opacity: 0, y: 8, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 8, scale: 0.98 }}
                             transition={{ duration: 0.16 }}
                           >
-                            <span className="mode-menu__label">Odaberite alat</span>
-                            {modeOptions.map((option) => {
-                              const Icon = option.icon;
-                              return (
-                                <button
-                                  type="button"
-                                  key={option.id}
-                                  className={promptMode === option.id ? 'is-selected' : ''}
-                                  onClick={() => {
-                                    setPromptMode(option.id);
-                                    setModeMenuOpen(false);
-                                  }}
-                                >
-                                  <span className="mode-menu__icon"><Icon size={18} /></span>
-                                  <span><strong>{option.label}</strong><small>{option.description}</small></span>
-                                  {promptMode === option.id && <Check size={16} />}
-                                </button>
-                              );
-                            })}
+                            <span className="mode-menu__label">Odaberite model</span>
+                            {modelOptions.map((option) => (
+                              <button
+                                type="button"
+                                key={option.id}
+                                className={selectedModel === option.id ? 'is-selected' : ''}
+                                onClick={() => {
+                                  setSelectedModel(option.id);
+                                  setModeMenuOpen(false);
+                                }}
+                              >
+                                <span className="mode-menu__icon"><Bot size={18} /></span>
+                                <span>
+                                  <strong>{option.label}{option.badge && <em>{option.badge}</em>}</strong>
+                                  <small>{option.description}</small>
+                                </span>
+                                {selectedModel === option.id && <Check size={16} />}
+                              </button>
+                            ))}
                           </motion.div>
                         )}
                       </AnimatePresence>
                       <button
                         type="button"
-                        className="mode-picker__trigger"
+                        className="model-picker__trigger"
                         onClick={() => setModeMenuOpen((value) => !value)}
                       >
-                        <selectedMode.icon size={16} />
-                        <span>{selectedMode.label}</span>
-                        <ChevronDown size={14} />
+                        <span className="model-picker__mark"><Bot size={17} /></span>
+                        <span><strong>{activeModel.label}</strong><small>{activeModel.description}</small></span>
+                        <ChevronDown size={15} />
                       </button>
                     </div>
-
-                    <button
-                      type="button"
-                      className="attach-button"
-                      onClick={() => navigate('scanner')}
-                      aria-label="Dodaj sliku"
-                      title="Dodaj sliku"
-                    >
-                      <Upload size={17} />
-                    </button>
-                    <button className="send-button" type="submit" aria-label="Pokreni">
-                      <Send size={17} />
-                    </button>
                   </div>
-                </form>
 
-                <div className="starter-grid">
-                  {starterPrompts.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button key={item.title} onClick={() => chooseStarter(item.text, item.mode)}>
-                        <span><Icon size={17} /></span>
-                        <strong>{item.title}</strong>
-                        <small>{item.text}</small>
-                      </button>
-                    );
-                  })}
+                  <div className="gpu-card">
+                    <span className="gpu-card__server"><Server size={18} /></span>
+                    <div className="gpu-card__identity">
+                      <span><i /> qla.dev local server</span>
+                      <strong>AMD Radeon 610M</strong>
+                    </div>
+                    <div className="gpu-card__meter" aria-label="Grafička aktivna">
+                      <span /><span /><span /><span /><span />
+                    </div>
+                    <div className="gpu-card__state"><Gauge size={14} /><span>GPU spremna</span></div>
+                  </div>
                 </div>
 
-                <p className="welcome__note">Bosančica AI može pogriješiti. Važne transkripcije provjerite sa stručnjakom.</p>
+                <p className="upload-home__note"><ShieldCheck size={13} /> Dokument se obrađuje sigurno i ne pohranjuje bez vaše dozvole.</p>
               </motion.section>
             ) : (
               <motion.section
@@ -400,26 +375,52 @@ export default function App() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.24 }}
               >
-                <div className="workspace-heading">
-                  <div>
-                    <span>{workspaceMeta[workspace].eyebrow}</span>
-                    <h1>{workspaceMeta[workspace].label}</h1>
-                    <p>
-                      {workspace === 'scanner' && 'Odaberite historijski dokument ili prenesite vlastitu fotografiju za analizu.'}
-                      {workspace === 'archive' && 'Pregledajte oblike, značenja i sačuvane varijante bosančičnih slova.'}
-                      {workspace === 'trainer' && 'Provjerite uzorke zajednice prije nego što postanu dio modela.'}
-                    </p>
-                  </div>
-                  <button className="workspace-heading__new" onClick={startNewConversation}>
-                    <Plus size={17} /> Novi upit
-                  </button>
-                </div>
-
                 {workspace === 'scanner' && (
-                  <ScanWorkflow
-                    onScanCompleted={(newScan) => setScansHistory((current) => [newScan, ...current])}
-                    scansHistory={scansHistory}
-                  />
+                  <>
+                    <div className="transcription-modelbar">
+                      <div className="mode-picker" ref={modeMenuRef}>
+                        <AnimatePresence>
+                          {modeMenuOpen && (
+                            <motion.div
+                              className="mode-menu transcription-model-menu"
+                              initial={{ opacity: 0, y: -6, scale: .98 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -6, scale: .98 }}
+                            >
+                              <span className="mode-menu__label">Dostupni lokalni modeli</span>
+                              <button type="button" className="is-selected" onClick={() => setModeMenuOpen(false)}>
+                                <span className="mode-menu__icon"><Bot size={18} /></span>
+                                <span><strong>{activeModel.label}<em>Lokalno</em></strong><small>{activeModel.description}</small></span>
+                                <Check size={16} />
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        <button
+                          type="button"
+                          className="transcription-modelbar__model"
+                          onClick={() => setModeMenuOpen((value) => !value)}
+                        >
+                          <span><Bot size={17} /></span>
+                          <div><small>Model transkripcije</small><strong>{activeModel.label}</strong></div>
+                          <ChevronDown size={14} />
+                        </button>
+                      </div>
+                      <div className="transcription-modelbar__gpu">
+                        <i />
+                        <div><small>qla.dev local server</small><strong>AMD Radeon 610M</strong></div>
+                        <div className="mini-meter"><span /><span /><span /><span /></div>
+                      </div>
+                    </div>
+                    <ScanWorkflow
+                      key={`scanner-${documentSelectionNonce}`}
+                      onScanCompleted={(newScan) => setScansHistory((current) => [newScan, ...current])}
+                      scansHistory={scansHistory}
+                      initialFiles={pendingUploads}
+                      initialPresetId={selectedPresetId}
+                      modelName={activeModel.label}
+                    />
+                  </>
                 )}
                 {workspace === 'archive' && (
                   <LetterArchive onAddTrainingSample={(sample) => setValidationQueue((current) => [sample, ...current])} />

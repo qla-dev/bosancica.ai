@@ -1,48 +1,49 @@
-import React, { useState, useRef } from 'react';
-import { PRESET_DOCUMENTS, MOCK_HISTORY } from '../data';
+import React, { useEffect, useState } from 'react';
+import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
-import { Upload, Cpu, FileText, CheckCircle2, History, RefreshCw, Layers, ArrowRight } from 'lucide-react';
+import { toBosancicaFontInput } from '../bosancica';
+import EditableLatinText from './EditableLatinText';
+import { Cpu, FileText, CheckCircle2, History, RefreshCw, Layers } from 'lucide-react';
 
 interface ScanWorkflowProps {
+  key?: string;
   onScanCompleted: (newScan: ScanItem) => void;
   scansHistory: ScanItem[];
+  initialFiles?: File[];
+  initialPresetId?: string | null;
+  modelName?: string;
 }
 
-export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWorkflowProps) {
+export default function ScanWorkflow({
+  onScanCompleted,
+  scansHistory,
+  initialFiles = [],
+  initialPresetId,
+  modelName = 'Kraken BVision OCR',
+}: ScanWorkflowProps) {
   const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(PRESET_DOCUMENTS[0]);
+  const [editedLines, setEditedLines] = useState<string[]>(() => PRESET_DOCUMENTS[0].lines.map((line) => line.textLatinica));
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [showResult, setShowResult] = useState(true);
   const [activeLine, setActiveLine] = useState<number | null>(null);
-  const [customFile, setCustomFile] = useState<{ name: string; url: string } | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [customDocuments, setCustomDocuments] = useState<Array<{ name: string; url: string; doc: PresetDocument }>>([]);
 
   const handleSelectPreset = (doc: PresetDocument) => {
     if (isScanning) return;
-    setCustomFile(null);
     setSelectedDoc(doc);
     setShowResult(true);
     setActiveLine(null);
   };
 
-  const triggerCustomFile = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
+  const makeCustomDocument = (file: File, index: number) => {
       const fakeUrl = URL.createObjectURL(file);
-      setCustomFile({ name: file.name, url: fakeUrl });
-
-      // Create a fake document based on the selection to model custom scanning
       const fakeDoc: PresetDocument = {
-        id: `custom-${Date.now()}`,
+        id: `custom-${file.lastModified}-${index}`,
         title: file.name.substring(0, 24) || 'Uvezeni dokument d.b',
         year: 'Nepoznat period',
         origin: 'Učitano sa lokalnog računara',
-        imageUrl: 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80',
+        imageUrl: fakeUrl,
         rawBosančicaText: 'Ⱆ ⰉⰏⰅ ⰑⰪA Ⰹ ⰔⰉⰐA Ⰹ ⰔⰂⰅⰕⰑⰃA ⰄⰖⰘA.',
         latinText: 'Automatski detektovan tekst u starom bosanskom pismu.',
         lines: [
@@ -60,11 +61,33 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
           }
         ]
       };
-      setSelectedDoc(fakeDoc);
+      return { name: file.name, url: fakeUrl, doc: fakeDoc };
+  };
+
+  const loadCustomFiles = (files: File[]) => {
+      const documents = files.filter((file) => file.type.startsWith('image/')).map(makeCustomDocument);
+      if (!documents.length) return;
+      setCustomDocuments(documents);
+      setSelectedDoc(documents[0].doc);
       setShowResult(false);
       setActiveLine(null);
-    }
   };
+
+  useEffect(() => {
+    if (initialFiles.length) loadCustomFiles(initialFiles);
+  }, [initialFiles]);
+
+  useEffect(() => {
+    if (!initialPresetId) return;
+    const document = PRESET_DOCUMENTS.find((item) => item.id === initialPresetId);
+    if (document) handleSelectPreset(document);
+  }, [initialPresetId]);
+
+  useEffect(() => {
+    setEditedLines(selectedDoc.lines.map((line) => line.textLatinica));
+  }, [selectedDoc]);
+
+  const customFile = customDocuments.find((item) => item.doc.id === selectedDoc.id) ?? null;
 
   const handleStartScan = () => {
     if (isScanning) return;
@@ -87,11 +110,31 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
               fileName: customFile ? customFile.name : `${selectedDoc.title.toLowerCase().replace(/\s+/g, '_')}.jpg`,
               title: selectedDoc.title,
               rawBosančicaText: selectedDoc.rawBosančicaText,
-              latinText: selectedDoc.latinText,
+              latinText: editedLines.join(' '),
               accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
               durationMs: Math.floor(600 + Math.random() * 800)
             };
             onScanCompleted(newHistoryItem);
+
+            if (customFile && customDocuments.length > 1) {
+              customDocuments
+                .filter((item) => item.doc.id !== selectedDoc.id)
+                .forEach((item, index) => {
+                  onScanCompleted({
+                    id: `scan-${Date.now()}-${index + 1}`,
+                    date: 'Danas, uzastopni test',
+                    fileName: item.name,
+                    ...item.doc,
+                    title: item.doc.title,
+                    /* Preserve the source OCR field through the spread above.
+                    rawBosanÄicaText: item.doc.rawBosanÄicaText,
+                    */
+                    latinText: item.doc.latinText,
+                    accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
+                    durationMs: Math.floor(600 + Math.random() * 800)
+                  });
+                });
+            }
           }, 400);
           return 100;
         }
@@ -143,37 +186,37 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
             ))}
           </div>
 
-          <div className="relative my-5 flex items-center justify-center">
-            <span className="absolute bg-[#0F0F0F] px-3 text-[9px] text-stone-500 font-serif uppercase tracking-widest">
-              ili prenesite novi uzorak
-            </span>
-            <div className="w-full border-t border-[#2A2A2A]"></div>
-          </div>
-
-          {/* CUSTOM UPLOAD TARGET */}
-          <div
-            onClick={triggerCustomFile}
-            className={`cursor-pointer group flex flex-col items-center justify-center border border-dashed rounded-xl p-4 transition-all duration-300 ${
-              customFile
-                ? 'bg-[#C5A059]/5 border-[#C5A059]/60'
-                : 'bg-[#0D0D0D] border-[#2A2A2A] hover:border-[#C5A059]'
-            }`}
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              accept="image/*"
-              className="hidden"
-            />
-            <Upload className="w-6 h-6 text-stone-500 group-hover:text-[#C5A059] mb-2 transition-colors" />
-            <span className="text-xs text-stone-200 font-medium">
-              {customFile ? customFile.name : 'Izaberite sliku natpisa'}
-            </span>
-            <span className="text-[10px] text-stone-500 mt-1 uppercase font-mono">
-              PNG, JPG do 10MB • Kraken OCR segmentator
-            </span>
-          </div>
+          {customDocuments.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-[#2A2A2A]">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[9px] text-stone-500 uppercase tracking-widest font-mono">Učitani dokumenti</span>
+                <span className="text-[9px] text-[#C5A059] font-mono">{customDocuments.length} slika</span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+              {customDocuments.map((item, index) => (
+                <button
+                  key={item.doc.id}
+                  type="button"
+                  onClick={() => {
+                    if (isScanning) return;
+                    setSelectedDoc(item.doc);
+                    setShowResult(false);
+                    setActiveLine(null);
+                  }}
+                  className={`relative w-16 h-16 shrink-0 rounded-lg overflow-hidden border transition-all ${
+                    selectedDoc.id === item.doc.id ? 'border-[#C5A059]' : 'border-[#2A2A2A] opacity-60 hover:opacity-100'
+                  }`}
+                  title={`${index + 1}. ${item.name}`}
+                >
+                  <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                  <span className="absolute bottom-1 left-1 min-w-4 h-4 px-1 grid place-items-center rounded bg-black/80 text-[8px] text-[#C5A059] font-mono">
+                    {index + 1}
+                  </span>
+                </button>
+              ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* WORKSPACE PREVIEW FRAME */}
@@ -185,7 +228,7 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
           </div>
 
           <p className="text-xs font-serif text-[#C5A059] uppercase tracking-[0.2em] mb-3">
-            Vizuelni Segmenter (Kraken OCR)
+            Vizuelni segmenter ({modelName})
           </p>
 
           <div className="relative flex-1 bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#2A2A2A] min-h-[300px] flex items-center justify-center group">
@@ -243,7 +286,7 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
               <div className="text-center p-6 z-10 max-w-xs">
                 <Layers className="w-10 h-10 text-[#C5A059]/40 mx-auto mb-3" />
                 <p className="text-xs text-stone-300 font-medium font-serif leading-relaxed">
-                  Pritisnite dugme ispod za pokretanje laserske Kraken segmentacije i prevođenja.
+                  Pritisnite dugme ispod za pokretanje AI segmentacije i prevođenja modelom {modelName}.
                 </p>
               </div>
             )}
@@ -264,7 +307,9 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
               ) : (
                 <>
                   <Cpu className="w-4.5 h-4.5 text-black" />
-                  <span>Pokreni AI Transkripciju</span>
+                  <span>
+                    Pokreni AI Transkripciju{customDocuments.length > 1 ? ` (${customDocuments.length} slika)` : ''}
+                  </span>
                 </>
               )}
             </button>
@@ -275,7 +320,7 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
       {/* RIGHT COLUMN: OCR Outputs / Decoders side by side & Scans Counter */}
       <div className="lg:col-span-7 flex flex-col gap-6">
         {/* COUNTER & PERFORMANCE HUDS */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-4 rounded-xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
             <span className="text-stone-500 text-[10px] uppercase font-serif tracking-[0.15em] block mb-1">
               Odrađeni skenovi
@@ -300,19 +345,6 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
             </div>
           </div>
 
-          <div className="col-span-2 sm:col-span-1 p-4 rounded-xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm flex flex-col justify-center">
-            <span className="text-stone-500 text-[10px] uppercase font-serif tracking-[0.15em] block mb-1">
-              Jezik platforme
-            </span>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-2.5 bg-stone-100 relative rounded-sm flex flex-col overflow-hidden">
-                <div className="h-1/3 bg-[#002F6C]"></div>
-                <div className="h-1/3 bg-[#F4C430]"></div>
-                <div className="h-1/3 bg-[#002F6C]"></div>
-              </div>
-              <span className="text-xs text-stone-300 font-medium">BOS (Starobosanski)</span>
-            </div>
-          </div>
         </div>
 
         {/* OCR RESULTS BOX */}
@@ -323,7 +355,7 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
                 AI Rezultat i Transkripcija
               </h3>
               <p className="text-xs text-stone-405 mt-0.5">
-                Drevne ligature izvučene Kraken mrežom na bosančici
+                Drevne ligature izdvojene modelom {modelName}
               </p>
             </div>
             {showResult && (
@@ -381,10 +413,10 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
                         {/* DIGITAL BOSANCICA GRAPHICS */}
                         <div className="flex flex-col gap-1.5 bg-black/40 p-2.5 rounded-lg border border-[#2A2A2A]">
                           <span className="text-[8px] text-stone-500 font-serif uppercase tracking-widest">
-                            Digitalna Bosančica (Font)
+                            Digitalna Bosančica
                           </span>
-                          <p className="text-xl font-serif text-[#C5A059] hover:text-[#D4B069] transition-colors tracking-widest break-all">
-                            {line.textBosančica}
+                          <p className="text-2xl font-bosanko text-[#C5A059] hover:text-[#D4B069] transition-colors tracking-wide break-words">
+                            {toBosancicaFontInput(line.textLatinica)}
                           </p>
                         </div>
 
@@ -393,9 +425,12 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
                           <span className="text-[8px] text-stone-500 font-serif uppercase tracking-widest">
                             Savremena Latinica
                           </span>
-                          <p className="text-xs text-stone-300 leading-relaxed font-sans">
-                            {line.textLatinica}
-                          </p>
+                          <EditableLatinText
+                            value={editedLines[idx] ?? line.textLatinica}
+                            onChange={(value) => setEditedLines((current) =>
+                              current.map((item, lineIndex) => lineIndex === idx ? value : item)
+                            )}
+                          />
                         </div>
                       </div>
                     </div>
@@ -409,7 +444,7 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
                   <span className="text-xs text-stone-400 font-serif">Kompletan Latinični Tekst</span>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(selectedDoc.latinText);
+                      navigator.clipboard.writeText(editedLines.join(' '));
                       alert('Tekst uspješno kopiran u međumemoriju!');
                     }}
                     className="text-[10px] text-[#C5A059] font-bold hover:text-[#D4B069] cursor-pointer"
@@ -418,7 +453,7 @@ export default function ScanWorkflow({ onScanCompleted, scansHistory }: ScanWork
                   </button>
                 </div>
                 <p className="text-xs text-[#E0E0E0] leading-relaxed italic">
-                  "{selectedDoc.latinText}"
+                  "{editedLines.join(' ')}"
                 </p>
               </div>
             </div>
