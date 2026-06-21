@@ -58,17 +58,17 @@ const modelOptions: Array<{
 ];
 
 const HOME_GREETINGS = [
-  'Zdravo, istraživaču. Koji dokument danas čitamo?',
+  'Zdravo, istraživaču. Koji dokument čitamo?',
   'Koji trag prošlosti danas čitamo?',
   'Spremni za novu transliteraciju?',
-  'Spustite dokument. Otkrijmo šta u njemu piše.',
+  'Spustite dokument. Otkrijmo šta piše.',
   'Koju stranicu historije danas otvaramo?',
   'Novi dokument, nova priča. Počnimo.',
   'Šta nam prošlost danas želi reći?',
   'Odaberite dokument i krenimo.',
   'Koji rukopis danas oživljavamo?',
   'Vrijeme je za još jedno otkriće.',
-  'Spustite trag. Mi ćemo pročitati znakove.',
+  'Spustite trag. Pročitajmo znakove.',
   'Koju povelju danas vraćamo u život?',
 ];
 
@@ -174,7 +174,7 @@ export default function App() {
   const activeModel = modelOptions.find((option) => option.id === selectedModel) ?? modelOptions[0];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${workspace === 'home' ? 'app-shell--home' : ''}`}>
       <AnimatePresence>
         {mobileSidebarOpen && (
           <motion.button
@@ -282,9 +282,7 @@ export default function App() {
             <span className="hidden lg:grid place-items-center">
               {sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
             </span>
-            <span className="grid lg:hidden place-items-center">
-              {mobileSidebarOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}
-            </span>
+            <span className="mobile-topbar-logo grid lg:hidden">Б</span>
           </IconButton>
 
           <div className="topbar__title">
