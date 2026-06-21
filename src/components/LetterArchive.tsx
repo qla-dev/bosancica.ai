@@ -3,6 +3,7 @@ import { BOSANCICA_LETTERS } from '../data';
 import { BosancicaLetter, ValidationSample } from '../types';
 import { Award, PenTool, CheckCircle, Link2, Plus, RefreshCw, Star, Trash2 } from 'lucide-react';
 import { toBosancicaFontInput } from '../bosancica';
+import Button from './ui/Button';
 
 interface LetterArchiveProps {
   onAddTrainingSample: (sample: ValidationSample) => void;
@@ -164,7 +165,7 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
         <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md shadow-2xl">
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
             {BOSANCICA_LETTERS.map((letter) => (
-              <button
+              <Button
                 key={letter.id}
                 onClick={() => setSelectedLetter(letter)}
                 className={`flex flex-col items-center justify-between p-3.5 rounded-xl border transition-all duration-300 relative group overflow-hidden ${
@@ -197,7 +198,7 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                     {letter.examplesCount} primjeraka
                   </span>
                 </div>
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -273,7 +274,7 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
             {selectedSimilarLetters.length > 0 ? (
               <div className="flex flex-wrap gap-2 mb-3">
                 {selectedSimilarLetters.map((letter) => (
-                  <button
+                  <Button
                     key={letter.id}
                     type="button"
                     onClick={() => setSelectedLetter(letter)}
@@ -281,7 +282,7 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                   >
                     <span className="font-bosanko text-3xl leading-none text-[#C5A059]">{getLetterGlyph(letter)}</span>
                     <span className="text-[10px] font-mono text-stone-400">{letter.latinChar}</span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             ) : (
@@ -299,14 +300,14 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
                   .filter((letter) => letter.id !== selectedLetter.id && !selectedSimilarLetters.some((item) => item.id === letter.id))
                   .map((letter) => <option key={letter.id} value={letter.id}>{letter.latinChar}</option>)}
               </select>
-              <button
+              <Button
                 type="button"
                 onClick={addSimilarLetter}
                 disabled={!newAssociationId}
-                className="h-9 px-3 flex items-center gap-1.5 rounded-lg bg-[#C5A059] text-black text-[10px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                className="h-9 px-3 flex items-center gap-1.5 rounded-lg bg-[#C5A059] text-white text-[10px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Plus className="w-3.5 h-3.5" /> Dodaj
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -359,22 +360,22 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
             </div>
 
             <div className="p-3 bg-[#0F0F0F]/60 border-t border-[#2A2A2A] flex gap-2">
-              <button
+              <Button
                 onClick={clearCanvas}
                 disabled={!hasDrawnContent}
                 className="px-3 py-1.5 rounded-lg border border-[#2A2A2A] hover:border-[#C5A059] text-stone-400 hover:text-[#C5A059] text-xs flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Očisti
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={submitTrainingSample}
                 disabled={!hasDrawnContent}
-                className="flex-1 px-4 py-2 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-black text-xs font-bold uppercase tracking-wider rounded-lg flex items-center justify-center gap-1.5 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                className="flex-1 px-4 py-2 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg flex items-center justify-center gap-1.5 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-black" />
+                <RefreshCw className="w-3.5 h-3.5 text-white" />
                 Pošalji AI Treneru
-              </button>
+              </Button>
             </div>
           </div>
         </div>

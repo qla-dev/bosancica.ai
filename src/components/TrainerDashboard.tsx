@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ValidationSample } from '../types';
 import { Cpu, Check, X, ShieldAlert, Sliders, Play, Terminal, Database, LineChart } from 'lucide-react';
+import Button from './ui/Button';
 
 interface TrainerDashboardProps {
   validationQueue: ValidationSample[];
@@ -171,14 +172,14 @@ export default function TrainerDashboard({
                 Pogon za Treniranje Neuralnog Modela
               </h4>
             </div>
-            <button
+            <Button
               onClick={startMockTraining}
               disabled={isTraining}
-              className="px-4 py-2 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-black text-xs font-bold uppercase tracking-wider rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
             >
-              <Play className="w-3.5 h-3.5 fill-black text-black" />
+              <Play className="w-3.5 h-3.5 fill-white text-white" />
               <span>{isTraining ? 'Fino učenje...' : 'Treniraj Model'}</span>
-            </button>
+            </Button>
           </div>
 
           <div
@@ -276,20 +277,20 @@ export default function TrainerDashboard({
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-                      <button
+                      <Button
                         onClick={() => onRejectSample(item.id)}
                         className="p-2 rounded bg-red-950/40 border border-red-900/40 text-red-400 hover:bg-red-905/60 transition-all cursor-pointer"
                         title="Odbaci crtež"
                       >
                         <X className="w-4 h-4" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => onApproveSample(item.id)}
                         className="p-2 rounded bg-emerald-900/30 border border-emerald-800/40 text-emerald-400 hover:bg-emerald-900/50 transition-all cursor-pointer"
                         title="Odobri i integriši u model"
                       >
                         <Check className="w-4 h-4" />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}

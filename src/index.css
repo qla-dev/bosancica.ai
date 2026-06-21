@@ -33,6 +33,19 @@ html, body, #root { min-height: 100%; }
 body { margin: 0; background: #171716; }
 button, textarea { font: inherit; }
 button { color: inherit; }
+.ui-button { -webkit-tap-highlight-color: transparent; }
+.ui-button:focus-visible { outline: 2px solid #c5a059; outline-offset: 2px; }
+.ui-button:disabled { cursor: not-allowed; }
+.ui-button > svg { flex: 0 0 auto; }
+.ui-button--primary { border: 1px solid #d8b66d; color: #fff; background: #c5a059; font-weight: 700; }
+.ui-button--primary:hover:not(:disabled) { background: #d4b069; }
+.ui-button--secondary { border: 1px solid #49453d; color: #dedad1; background: #24231f; }
+.ui-button--ghost { border: 0; color: #a8a49c; background: transparent; }
+.ui-button--ghost:hover:not(:disabled) { color: #fff; background: #292724; }
+.ui-button--danger { border: 1px solid rgba(153,27,27,.5); color: #f87171; background: rgba(69,10,10,.35); }
+.ui-button--sm { min-height: 34px; padding: 0 11px; border-radius: 9px; font-size: 11px; }
+.ui-button--md { min-height: 42px; padding: 0 15px; border-radius: 11px; font-size: 12px; }
+.ui-button--icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; }
 .font-bosanko { font-family: "BoSanko2", serif; font-weight: 400; }
 .latin-editor { width: 100%; min-height: 72px; resize: vertical; border: 1px solid transparent; border-radius: 7px; outline: none; color: #d6d2ca; background: transparent; font-size: 12px; line-height: 1.55; transition: border-color 160ms ease, background 160ms ease; }
 .latin-editor:hover { border-color: #34322e; background: rgba(0,0,0,.14); }
@@ -167,7 +180,7 @@ button { color: inherit; }
 .attach-button, .send-button { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; cursor: pointer; }
 .attach-button { margin-left: auto; border: 0; color: #88857e; background: transparent; }
 .attach-button:hover { color: #e0dcd4; background: #33312e; }
-.send-button { border: 1px solid #dfbd75; color: #17130d; background: #c9a45f; }
+.send-button { border: 1px solid #dfbd75; color: #fff; background: #c9a45f; }
 .send-button:hover { background: #dbb96f; }
 
 .starter-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
@@ -190,7 +203,7 @@ button { color: inherit; }
 .upload-dropzone__icon { width: 62px; height: 62px; margin-bottom: 18px; display: grid; place-items: center; border: 1px solid #574a34; border-radius: 18px; color: #c9a45f; background: #29241c; box-shadow: 0 12px 35px rgba(0,0,0,.2); }
 .upload-dropzone strong { color: #ece8df; font-size: 16px; font-weight: 600; }
 .upload-dropzone small { margin-top: 5px; color: #77746e; font-size: 11px; }
-.upload-dropzone em { height: 36px; margin-top: 20px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border: 1px solid #d7b66f; border-radius: 10px; color: #17130d; background: #c9a45f; font-size: 11px; font-style: normal; font-weight: 700; }
+.upload-dropzone em { height: 36px; margin-top: 20px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border: 1px solid #d7b66f; border-radius: 10px; color: #fff; background: #c9a45f; font-size: 11px; font-style: normal; font-weight: 700; }
 .upload-dropzone__formats { margin-top: 15px; color: #5f5c57; font: 500 9px/1.4 "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .model-row { order: 2; margin-bottom: 13px; padding: 1px 3px 0 7px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .model-row > div:first-child { display: flex; flex-direction: column; }

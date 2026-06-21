@@ -4,6 +4,7 @@ import { PresetDocument, ScanItem } from '../types';
 import { toBosancicaFontInput } from '../bosancica';
 import EditableLatinText from './EditableLatinText';
 import { Cpu, FileText, CheckCircle2, History, RefreshCw, Layers } from 'lucide-react';
+import Button from './ui/Button';
 
 interface ScanWorkflowProps {
   key?: string;
@@ -154,7 +155,7 @@ export default function ScanWorkflow({
           </legend>
           <div className="flex flex-col gap-3">
             {PRESET_DOCUMENTS.map((doc) => (
-              <button
+              <Button
                 key={doc.id}
                 onClick={() => handleSelectPreset(doc)}
                 className={`w-full text-left p-3.5 rounded-xl transition-all duration-300 flex items-start gap-4 border ${
@@ -182,7 +183,7 @@ export default function ScanWorkflow({
                   </div>
                   <p className="text-[11px] text-stone-400 truncate">{doc.origin}</p>
                 </div>
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -194,7 +195,7 @@ export default function ScanWorkflow({
               </div>
               <div className="flex gap-2 overflow-x-auto pb-1">
               {customDocuments.map((item, index) => (
-                <button
+                <Button
                   key={item.doc.id}
                   type="button"
                   onClick={() => {
@@ -212,7 +213,7 @@ export default function ScanWorkflow({
                   <span className="absolute bottom-1 left-1 min-w-4 h-4 px-1 grid place-items-center rounded bg-black/80 text-[8px] text-[#C5A059] font-mono">
                     {index + 1}
                   </span>
-                </button>
+                </Button>
               ))}
               </div>
             </div>
@@ -293,26 +294,26 @@ export default function ScanWorkflow({
           </div>
 
           <div className="mt-4 flex flex-col sm:flex-row gap-3">
-            <button
+            <Button
               id="btn-scan-trigger"
               onClick={handleStartScan}
               disabled={isScanning}
-              className="flex-1 flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-black text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-[0.98] cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-[0.98] cursor-pointer"
             >
               {isScanning ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-black" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
                   <span>Skeniranje u toku ({scanProgress}%)</span>
                 </>
               ) : (
                 <>
-                  <Cpu className="w-4.5 h-4.5 text-black" />
+                  <Cpu className="w-4.5 h-4.5 text-white" />
                   <span>
                     Pokreni AI Transkripciju{customDocuments.length > 1 ? ` (${customDocuments.length} slika)` : ''}
                   </span>
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -442,7 +443,7 @@ export default function ScanWorkflow({
               <div className="mt-4 p-4 rounded-xl bg-black/45 border border-[#2A2A2A]">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-stone-400 font-serif">Kompletan Latinični Tekst</span>
-                  <button
+                  <Button
                     onClick={() => {
                       navigator.clipboard.writeText(editedLines.join(' '));
                       alert('Tekst uspješno kopiran u međumemoriju!');
@@ -450,7 +451,7 @@ export default function ScanWorkflow({
                     className="text-[10px] text-[#C5A059] font-bold hover:text-[#D4B069] cursor-pointer"
                   >
                     Kopiraj Tekst
-                  </button>
+                  </Button>
                 </div>
                 <p className="text-xs text-[#E0E0E0] leading-relaxed italic">
                   "{editedLines.join(' ')}"

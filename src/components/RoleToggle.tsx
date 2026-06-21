@@ -1,5 +1,6 @@
 import { Role } from '../types';
 import { ShieldAlert, User, Landmark } from 'lucide-react';
+import Button from './ui/Button';
 
 interface RoleToggleProps {
   currentRole: Role;
@@ -27,20 +28,20 @@ export default function RoleToggle({ currentRole, onChange }: RoleToggleProps) {
       </div>
 
       <div className="flex bg-[#0A0A0A] p-1.5 rounded-xl border border-[#2A2A2A] self-stretch md:self-auto z-10">
-        <button
+        <Button
           id="btn-role-korisnik"
           onClick={() => onChange('korisnik')}
           className={`flex-1 md:flex-initial flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-300 ${
             currentRole === 'korisnik'
-              ? 'bg-[#C5A059] text-black shadow-lg font-bold border border-[#D4B069]/40'
+              ? 'bg-[#C5A059] text-white shadow-lg font-bold border border-[#D4B069]/40'
               : 'text-stone-400 hover:text-stone-200 hover:bg-[#1A1A1A]'
           }`}
         >
           <User className="w-4 h-4" />
           <span>Istraživač / Korisnik</span>
-        </button>
+        </Button>
 
-        <button
+        <Button
           id="btn-role-trener"
           onClick={() => onChange('trener')}
           className={`flex-1 md:flex-initial flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-300 ${
@@ -51,7 +52,7 @@ export default function RoleToggle({ currentRole, onChange }: RoleToggleProps) {
         >
           <ShieldAlert className="w-4 h-4" />
           <span>AI Trener / Nadzor</span>
-        </button>
+        </Button>
       </div>
     </div>
   );

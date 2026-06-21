@@ -1,6 +1,7 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, LoaderCircle, Sparkles } from 'lucide-react';
+import Button from './ui/Button';
 
 interface EditableLatinTextProps {
   value: string;
@@ -106,7 +107,7 @@ export default function EditableLatinText({ value, onChange }: EditableLatinText
 
       {menu && createPortal(
         <>
-          <button className="character-menu-scrim" aria-label="Zatvori prijedloge" onClick={() => setMenu(null)} />
+          <Button className="character-menu-scrim" aria-label="Zatvori prijedloge" onClick={() => setMenu(null)} />
           <div className="character-menu" style={position}>
             <div className="character-menu__header">
               <span><Sparkles size={13} /> Slična slova za</span>
@@ -117,9 +118,9 @@ export default function EditableLatinText({ value, onChange }: EditableLatinText
             ) : suggestions.length ? (
               <div className="character-menu__options">
                 {suggestions.map((suggestion) => (
-                  <button key={suggestion} onClick={() => applySuggestion(suggestion)}>
+                  <Button key={suggestion} onClick={() => applySuggestion(suggestion)}>
                     <span>{suggestion}</span><Check size={12} />
-                  </button>
+                  </Button>
                 ))}
               </div>
             ) : (

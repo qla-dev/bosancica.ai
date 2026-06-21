@@ -27,6 +27,8 @@ import { ScanItem, ValidationSample } from './types';
 import ScanWorkflow from './components/ScanWorkflow';
 import LetterArchive from './components/LetterArchive';
 import TrainerDashboard from './components/TrainerDashboard';
+import Button from './components/ui/Button';
+import IconButton from './components/ui/IconButton';
 
 type Workspace = 'home' | 'scanner' | 'archive' | 'trainer';
 type RecentDocument = {
@@ -80,6 +82,7 @@ export default function App() {
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const homeFileInputRef = useRef<HTMLInputElement>(null);
+  const mainShellRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
@@ -90,6 +93,11 @@ export default function App() {
     document.addEventListener('mousedown', closeMenus);
     return () => document.removeEventListener('mousedown', closeMenus);
   }, []);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    mainShellRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [workspace, documentSelectionNonce]);
 
   const navigate = (next: Workspace) => {
     setWorkspace(next);
@@ -151,7 +159,7 @@ export default function App() {
         }`}
       >
         <div className="sidebar__top">
-          <button className="brand" onClick={startNewConversation} aria-label="Bosančica AI početna">
+          <Button className="brand" onClick={startNewConversation} aria-label="Bosančica AI početna">
             <span className="brand__mark">Б</span>
             {!sidebarCollapsed && (
               <span className="brand__copy">
@@ -159,38 +167,38 @@ export default function App() {
                 <small>digitalna baština</small>
               </span>
             )}
-          </button>
-          <button
+          </Button>
+          <IconButton
             className="icon-button hidden lg:grid"
             onClick={() => setSidebarCollapsed((value) => !value)}
             aria-label={sidebarCollapsed ? 'Proširi navigaciju' : 'Sakrij navigaciju'}
           >
             {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </button>
-          <button
+          </IconButton>
+          <IconButton
             className="icon-button lg:hidden"
             onClick={() => setMobileSidebarOpen(false)}
             aria-label="Zatvori navigaciju"
           >
             <X size={19} />
-          </button>
+          </IconButton>
         </div>
 
-        <button className="new-chat-button" onClick={startNewConversation}>
+        <Button className="new-chat-button" onClick={startNewConversation}>
           <Plus size={18} />
           {!sidebarCollapsed && <span>Novi dokument</span>}
-        </button>
+        </Button>
 
         <nav className="sidebar__nav" aria-label="Glavna navigacija">
-          <button className={workspace === 'scanner' ? 'is-active' : ''} onClick={() => navigate('scanner')}>
+          <Button className={workspace === 'scanner' ? 'is-active' : ''} onClick={() => navigate('scanner')}>
             <ScanLine size={19} />
             {!sidebarCollapsed && <span>Transkripcija</span>}
-          </button>
-          <button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
+          </Button>
+          <Button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
             <Archive size={19} />
             {!sidebarCollapsed && <span>Arhiv slova</span>}
-          </button>
-          <button className={workspace === 'trainer' ? 'is-active' : ''} onClick={() => navigate('trainer')}>
+          </Button>
+          <Button className={workspace === 'trainer' ? 'is-active' : ''} onClick={() => navigate('trainer')}>
             <Bot size={19} />
             {!sidebarCollapsed && (
               <>
@@ -198,7 +206,7 @@ export default function App() {
                 {validationQueue.length > 0 && <em>{validationQueue.length}</em>}
               </>
             )}
-          </button>
+          </Button>
         </nav>
 
         {!sidebarCollapsed && (
@@ -208,10 +216,10 @@ export default function App() {
               <History size={13} />
             </div>
             {recentDocuments.map((document) => (
-              <button key={document.id} onClick={() => openRecentDocument(document)}>
+              <Button key={document.id} onClick={() => openRecentDocument(document)}>
                 <MessageSquareText size={15} />
                 <span>{document.title}</span>
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -225,12 +233,12 @@ export default function App() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.98 }}
               >
-                <button><Settings size={16} /> Postavke</button>
-                <button><BookOpen size={16} /> O projektu</button>
+                <Button><Settings size={16} /> Postavke</Button>
+                <Button><BookOpen size={16} /> O projektu</Button>
               </motion.div>
             )}
           </AnimatePresence>
-          <button className="profile-button" onClick={() => setProfileMenuOpen((value) => !value)}>
+          <Button className="profile-button" onClick={() => setProfileMenuOpen((value) => !value)}>
             <span className="profile-button__avatar"><UserRound size={17} /></span>
             {!sidebarCollapsed && (
               <span className="profile-button__copy">
@@ -239,19 +247,19 @@ export default function App() {
               </span>
             )}
             {!sidebarCollapsed && <ChevronDown size={15} />}
-          </button>
+          </Button>
         </div>
       </aside>
 
-      <section className="main-shell">
+      <section ref={mainShellRef} className="main-shell">
         <header className="topbar">
-          <button
+          <IconButton
             className="icon-button lg:hidden"
             onClick={() => setMobileSidebarOpen(true)}
             aria-label="Otvori navigaciju"
           >
             <Menu size={20} />
-          </button>
+          </IconButton>
 
           <div className="topbar__title">
             <span>{workspaceMeta[workspace].eyebrow}</span>
@@ -286,7 +294,7 @@ export default function App() {
                       if (event.target.files) openUploadedDocuments(Array.from(event.target.files));
                     }}
                   />
-                  <button
+                  <Button
                     type="button"
                     className={`upload-dropzone ${isDragging ? 'is-dragging' : ''}`}
                     onClick={() => homeFileInputRef.current?.click()}
@@ -300,7 +308,7 @@ export default function App() {
                     <small>jedna fotografija ili cijeli niz stranica</small>
                     <em><Upload size={15} /> Odaberi slike</em>
                     <span className="upload-dropzone__formats">PNG, JPG ili WEBP · multiple upload</span>
-                  </button>
+                  </Button>
 
                   <div className="model-row">
                     <div>
@@ -319,7 +327,7 @@ export default function App() {
                           >
                             <span className="mode-menu__label">Odaberite model</span>
                             {modelOptions.map((option) => (
-                              <button
+                              <Button
                                 type="button"
                                 key={option.id}
                                 className={selectedModel === option.id ? 'is-selected' : ''}
@@ -334,12 +342,12 @@ export default function App() {
                                   <small>{option.description}</small>
                                 </span>
                                 {selectedModel === option.id && <Check size={16} />}
-                              </button>
+                              </Button>
                             ))}
                           </motion.div>
                         )}
                       </AnimatePresence>
-                      <button
+                      <Button
                         type="button"
                         className="model-picker__trigger"
                         onClick={() => setModeMenuOpen((value) => !value)}
@@ -347,7 +355,7 @@ export default function App() {
                         <span className="model-picker__mark"><Bot size={17} /></span>
                         <span><strong>{activeModel.label}</strong><small>{activeModel.description}</small></span>
                         <ChevronDown size={15} />
-                      </button>
+                      </Button>
                     </div>
                   </div>
 
@@ -388,15 +396,15 @@ export default function App() {
                               exit={{ opacity: 0, y: -6, scale: .98 }}
                             >
                               <span className="mode-menu__label">Dostupni lokalni modeli</span>
-                              <button type="button" className="is-selected" onClick={() => setModeMenuOpen(false)}>
+                              <Button type="button" className="is-selected" onClick={() => setModeMenuOpen(false)}>
                                 <span className="mode-menu__icon"><Bot size={18} /></span>
                                 <span><strong>{activeModel.label}<em>Lokalno</em></strong><small>{activeModel.description}</small></span>
                                 <Check size={16} />
-                              </button>
+                              </Button>
                             </motion.div>
                           )}
                         </AnimatePresence>
-                        <button
+                        <Button
                           type="button"
                           className="transcription-modelbar__model"
                           onClick={() => setModeMenuOpen((value) => !value)}
@@ -404,7 +412,7 @@ export default function App() {
                           <span><Bot size={17} /></span>
                           <div><small>Model transkripcije</small><strong>{activeModel.label}</strong></div>
                           <ChevronDown size={14} />
-                        </button>
+                        </Button>
                       </div>
                       <div className="transcription-modelbar__gpu">
                         <i />
