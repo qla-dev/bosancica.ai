@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  Archive,
   BookOpen,
   Bot,
   Check,
@@ -11,17 +10,19 @@ import {
   Image as ImageIcon,
   Images,
   MessageSquareText,
+  Languages,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  ScanLine,
   Settings,
   ShieldCheck,
   Upload,
   UserRound,
 } from 'lucide-react';
-import { MOCK_HISTORY, MOCK_VALIDATION_SAMPLES, PRESET_DOCUMENTS } from './data';
-import { ScanItem, ValidationSample } from './types';
-import ScanWorkflow from './components/ScanWorkflow';
+import { MOCK_HISTORY, PRESET_DOCUMENTS } from './data';
+import { ScanItem } from './types';
+import ScanWorkflow, { type ScanProcessStatus, type ScanWorkflowHandle } from './components/ScanWorkflow';
 import LetterArchive from './components/LetterArchive';
 import TrainerDashboard from './components/TrainerDashboard';
 import Button from './components/ui/Button';
@@ -40,8 +41,8 @@ type RecentDocument = {
 const workspaceMeta: Record<Workspace, { label: string; eyebrow: string }> = {
   home: { label: 'Novi dokument', eyebrow: 'Bosančica AI' },
   scanner: { label: 'Skeniranje i transliteracija', eyebrow: 'OCR laboratorija' },
-  archive: { label: 'Arhiv slova', eyebrow: 'Digitalna zbirka' },
-  trainer: { label: 'AI trener', eyebrow: 'Nadzor modela' },
+  archive: { label: 'AI trainer slova', eyebrow: 'Digitalna zbirka' },
+  trainer: { label: 'Postavke', eyebrow: 'Konfiguracija modela' },
 };
 
 const modelOptions: Array<{
@@ -122,6 +123,7 @@ export default function App() {
   const [documentFocusMode, setDocumentFocusMode] = useState(false);
   const [researcherReviewed, setResearcherReviewed] = useState(false);
   const [reviewAvailable, setReviewAvailable] = useState(true);
+  const [scanProcessStatus, setScanProcessStatus] = useState<ScanProcessStatus>({ stage: 'idle', progress: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -129,7 +131,6 @@ export default function App() {
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
-  const [validationQueue, setValidationQueue] = useState<ValidationSample[]>(MOCK_VALIDATION_SAMPLES);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(
     PRESET_DOCUMENTS.map((document) => ({
       id: document.id,
@@ -145,6 +146,7 @@ export default function App() {
   const uploadMenuRef = useRef<HTMLDivElement>(null);
   const mainShellRef = useRef<HTMLElement>(null);
   const dragDepthRef = useRef(0);
+  const scanWorkflowRef = useRef<ScanWorkflowHandle>(null);
 
   useEffect(() => {
     if (authSessionExpiresAt === null) return;
@@ -201,6 +203,7 @@ export default function App() {
     setDocumentFocusMode(false);
     setResearcherReviewed(false);
     setReviewAvailable(true);
+    setScanProcessStatus({ stage: 'idle', progress: 0 });
     setGreetingIndex((current) => (current + 1) % HOME_GREETINGS.length);
     navigate('home');
   };
@@ -218,6 +221,7 @@ export default function App() {
     setDocumentFocusMode(false);
     setResearcherReviewed(false);
     setReviewAvailable(false);
+    setScanProcessStatus({ stage: 'idle', progress: 0 });
     setDocumentSelectionNonce((value) => value + 1);
     setRecentDocuments((current) => [item, ...current].slice(0, 7));
     navigate('scanner');
@@ -287,6 +291,9 @@ export default function App() {
     setDocumentFocusMode(true);
     setResearcherReviewed(false);
     setReviewAvailable(!document.files?.length);
+    setScanProcessStatus(document.files?.length
+      ? { stage: 'idle', progress: 0 }
+      : { stage: 'complete', progress: 100 });
     setDocumentSelectionNonce((value) => value + 1);
     navigate('scanner');
   };
@@ -295,6 +302,8 @@ export default function App() {
   const averageAccuracy = scansHistory.length
     ? scansHistory.reduce((sum, scan) => sum + scan.accuracy, 0) / scansHistory.length
     : 0;
+  const segmentationComplete = ['segmented', 'transliterating', 'complete'].includes(scanProcessStatus.stage);
+  const transliterationComplete = scanProcessStatus.stage === 'complete';
 
   const handleLoginSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -448,15 +457,10 @@ export default function App() {
 
         <nav className="sidebar__nav" aria-label="Glavna navigacija">
           <Button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
-            <Archive size={19} />
-            {!sidebarCollapsed && <span>Arhiv slova</span>}
-          </Button>
-          <Button className={workspace === 'trainer' ? 'is-active' : ''} onClick={() => navigate('trainer')}>
             <Bot size={19} />
             {!sidebarCollapsed && (
               <>
-                <span>AI trener</span>
-                {validationQueue.length > 0 && <em>{validationQueue.length}</em>}
+                <span>AI trainer slova</span>
               </>
             )}
           </Button>
@@ -486,7 +490,14 @@ export default function App() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.98 }}
               >
-                <Button><Settings size={16} /> Postavke</Button>
+                <Button
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    navigate('trainer');
+                  }}
+                >
+                  <Settings size={16} /> Postavke
+                </Button>
                 <Button><BookOpen size={16} /> O projektu</Button>
               </motion.div>
             )}
@@ -714,6 +725,18 @@ export default function App() {
                                 <span><strong>{activeModel.label}<em>Lokalno</em></strong><small>{activeModel.description}</small></span>
                                 <Check size={16} />
                               </Button>
+                              <div className="transcription-model-menu__stats" aria-label="Statistika obrade">
+                                <div>
+                                  <small>Odrađeni skenovi</small>
+                                  <strong>{scansHistory.length}</strong>
+                                  <span>Aktivan status</span>
+                                </div>
+                                <div>
+                                  <small>Prosjek pouzdanosti</small>
+                                  <strong>{averageAccuracy.toFixed(1)}%</strong>
+                                  <span>AI model v1.4</span>
+                                </div>
+                              </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -727,18 +750,44 @@ export default function App() {
                           <ChevronDown size={14} />
                         </Button>
                       </div>
-                      <div className="transcription-modelbar__stats" aria-label="Statistika obrade">
-                        <div className="transcription-modelbar__stat">
-                          <small>Odrađeni skenovi</small>
-                          <strong>{scansHistory.length}</strong>
-                          <span>Aktivan status</span>
+                      <Button
+                        type="button"
+                        disabled={scanProcessStatus.stage !== 'idle'}
+                        onClick={() => scanWorkflowRef.current?.startSegmentation()}
+                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'segmenting' ? 'is-running' : ''} ${segmentationComplete ? 'is-complete' : ''}`}
+                      >
+                        <ScanLine size={16} />
+                        <div>
+                          <small>Segmentacija</small>
+                          <strong>
+                            {scanProcessStatus.stage === 'segmenting'
+                              ? `U toku ${scanProcessStatus.progress}%`
+                              : segmentationComplete
+                                ? `Gotova · ${scanProcessStatus.segmentationModel || activeModel.label}`
+                                : 'Pokreni segmentaciju'}
+                          </strong>
                         </div>
-                        <div className="transcription-modelbar__stat">
-                          <small>Prosjek pouzdanosti</small>
-                          <strong>{averageAccuracy.toFixed(1)}%</strong>
-                          <span>AI model v1.4</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        disabled={scanProcessStatus.stage !== 'segmented'}
+                        onClick={() => scanWorkflowRef.current?.startTransliteration()}
+                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'transliterating' ? 'is-running' : ''} ${transliterationComplete ? 'is-complete' : ''}`}
+                      >
+                        <Languages size={16} />
+                        <div>
+                          <small>Transliteracija</small>
+                          <strong>
+                            {scanProcessStatus.stage === 'transliterating'
+                              ? `U toku ${scanProcessStatus.progress}%`
+                              : transliterationComplete
+                                ? `Gotova · ${scanProcessStatus.transliterationModel || activeModel.label}`
+                                : scanProcessStatus.stage === 'segmented'
+                                  ? 'Pokreni transliteraciju'
+                                  : 'Čeka segmentaciju'}
+                          </strong>
                         </div>
-                      </div>
+                      </Button>
                       <Button
                         type="button"
                         disabled={!reviewAvailable}
@@ -753,9 +802,9 @@ export default function App() {
                       </Button>
                     </div>
                     <ScanWorkflow
+                      ref={scanWorkflowRef}
                       key={`scanner-${documentSelectionNonce}`}
                       onScanCompleted={(newScan) => setScansHistory((current) => [newScan, ...current])}
-                      scansHistory={scansHistory}
                       initialFiles={pendingUploads}
                       initialPresetId={selectedPresetId}
                       initialDocumentName={documentName.trim()}
@@ -764,18 +813,15 @@ export default function App() {
                       researcherReviewed={researcherReviewed}
                       onResearcherReviewedChange={setResearcherReviewed}
                       onReviewAvailabilityChange={setReviewAvailable}
+                      onProcessStatusChange={setScanProcessStatus}
                     />
                   </>
                 )}
                 {workspace === 'archive' && (
-                  <LetterArchive onAddTrainingSample={(sample) => setValidationQueue((current) => [sample, ...current])} />
+                  <LetterArchive />
                 )}
                 {workspace === 'trainer' && (
-                  <TrainerDashboard
-                    validationQueue={validationQueue}
-                    onApproveSample={(id) => setValidationQueue((current) => current.filter((item) => item.id !== id))}
-                    onRejectSample={(id) => setValidationQueue((current) => current.filter((item) => item.id !== id))}
-                  />
+                  <TrainerDashboard />
                 )}
               </motion.section>
             )}

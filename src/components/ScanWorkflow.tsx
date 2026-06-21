@@ -1,16 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
-import { toBosancicaFontInput } from '../bosancica';
+import BosancicaHoverText from './BosancicaHoverText';
 import EditableLatinText from './EditableLatinText';
-import { BadgeCheck, CalendarClock, Cpu, FileText, CheckCircle2, History, MapPin, RefreshCw, Layers } from 'lucide-react';
+import { CalendarClock, FileText, CheckCircle2, MapPin, Pencil, RefreshCw, Layers, X } from 'lucide-react';
 import Button from './ui/Button';
 import PrimaryButton from './ui/PrimaryButton';
+
+export type ScanProcessStage = 'idle' | 'segmenting' | 'segmented' | 'transliterating' | 'complete';
+
+export interface ScanProcessStatus {
+  stage: ScanProcessStage;
+  progress: number;
+  segmentationModel?: string;
+  transliterationModel?: string;
+}
+
+export interface ScanWorkflowHandle {
+  startSegmentation: () => void;
+  startTransliteration: () => void;
+}
 
 interface ScanWorkflowProps {
   key?: string;
   onScanCompleted: (newScan: ScanItem) => void;
-  scansHistory: ScanItem[];
   initialFiles?: File[];
   initialPresetId?: string | null;
   initialDocumentName?: string;
@@ -19,11 +32,11 @@ interface ScanWorkflowProps {
   researcherReviewed: boolean;
   onResearcherReviewedChange: (reviewed: boolean) => void;
   onReviewAvailabilityChange: (available: boolean) => void;
+  onProcessStatusChange: (status: ScanProcessStatus) => void;
 }
 
-export default function ScanWorkflow({
+const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function ScanWorkflow({
   onScanCompleted,
-  scansHistory,
   initialFiles = [],
   initialPresetId,
   initialDocumentName,
@@ -32,28 +45,36 @@ export default function ScanWorkflow({
   researcherReviewed,
   onResearcherReviewedChange,
   onReviewAvailabilityChange,
-}: ScanWorkflowProps) {
+  onProcessStatusChange,
+}: ScanWorkflowProps, ref) {
   const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(PRESET_DOCUMENTS[0]);
   const [editedLines, setEditedLines] = useState<string[]>(() => PRESET_DOCUMENTS[0].lines.map((line) => line.textLatinica));
-  const [isScanning, setIsScanning] = useState(false);
+  const [processStage, setProcessStage] = useState<ScanProcessStage>('complete');
   const [scanProgress, setScanProgress] = useState(0);
-  const [showResult, setShowResult] = useState(true);
+  const [completedModels, setCompletedModels] = useState({
+    segmentationModel: modelName,
+    transliterationModel: modelName,
+  });
   const [activeLine, setActiveLine] = useState<number | null>(null);
+  const [editedLocation, setEditedLocation] = useState(PRESET_DOCUMENTS[0].origin);
+  const [locationDraft, setLocationDraft] = useState(PRESET_DOCUMENTS[0].origin);
+  const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [customDocuments, setCustomDocuments] = useState<Array<{ name: string; url: string; doc: PresetDocument }>>([]);
-  const [processedAt] = useState(() =>
-    new Intl.DateTimeFormat('bs-BA', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date())
-  );
+  const [processedAt] = useState(() => {
+    const date = new Date();
+    return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
+  });
+  const processIntervalRef = useRef<number | null>(null);
+  const processCompletionRef = useRef<number | null>(null);
+  const isProcessing = processStage === 'segmenting' || processStage === 'transliterating';
+  const isScanning = isProcessing;
+  const showResult = processStage === 'complete';
 
   const handleSelectPreset = (doc: PresetDocument) => {
-    if (isScanning) return;
+    if (isProcessing) return;
     setSelectedDoc(doc);
-    setShowResult(true);
+    setProcessStage('complete');
+    setScanProgress(100);
     setActiveLine(null);
     onResearcherReviewedChange(false);
   };
@@ -105,9 +126,15 @@ export default function ScanWorkflow({
       if (!documents.length) return;
       setCustomDocuments(documents);
       setSelectedDoc(documents[0].doc);
-      setShowResult(false);
+      setProcessStage('idle');
+      setScanProgress(0);
+      setCompletedModels({ segmentationModel: '', transliterationModel: '' });
       setActiveLine(null);
       onResearcherReviewedChange(false);
+      runProcess('segmenting', () => {
+        setCompletedModels((current) => ({ ...current, segmentationModel: modelName }));
+        setProcessStage('segmented');
+      });
   };
 
   useEffect(() => {
@@ -122,24 +149,34 @@ export default function ScanWorkflow({
 
   useEffect(() => {
     setEditedLines(selectedDoc.lines.map((line) => line.textLatinica));
+    setEditedLocation(selectedDoc.origin);
+    setLocationDraft(selectedDoc.origin);
+    setLocationModalOpen(false);
     onResearcherReviewedChange(false);
   }, [onResearcherReviewedChange, selectedDoc]);
 
   useEffect(() => {
-    onReviewAvailabilityChange(showResult && !isScanning);
-  }, [isScanning, onReviewAvailabilityChange, showResult]);
+    onReviewAvailabilityChange(processStage === 'complete');
+    onProcessStatusChange({ stage: processStage, progress: scanProgress, ...completedModels });
+  }, [completedModels, onProcessStatusChange, onReviewAvailabilityChange, processStage, scanProgress]);
 
   const customFile = customDocuments.find((item) => item.doc.id === selectedDoc.id) ?? null;
-  const segmentationComplete = showResult || scanProgress >= 45;
-  const transliterationComplete = showResult;
+  const segmentationComplete = ['segmented', 'transliterating', 'complete'].includes(processStage);
+  const transliterationComplete = processStage === 'complete';
   const completedStatusCount = [segmentationComplete, transliterationComplete, researcherReviewed].filter(Boolean).length;
   const statusItems = [
     {
-      label: segmentationComplete ? 'Segmentacija gotova' : isScanning ? 'Segmentacija u toku' : 'Čeka segmentaciju',
+      label: segmentationComplete ? 'Segmentacija gotova' : processStage === 'segmenting' ? 'Segmentacija u toku' : 'Čeka segmentaciju',
       complete: segmentationComplete,
     },
     {
-      label: transliterationComplete ? 'Transliteracija gotova' : isScanning ? 'Transliteracija u toku' : 'Čeka transliteraciju',
+      label: transliterationComplete
+        ? 'Transliteracija gotova'
+        : processStage === 'transliterating'
+          ? 'Transliteracija u toku'
+          : segmentationComplete
+            ? 'Transliteracija spremna'
+            : 'Čeka transliteraciju',
       complete: transliterationComplete,
     },
     {
@@ -148,59 +185,82 @@ export default function ScanWorkflow({
     },
   ];
 
-  const handleStartScan = () => {
-    if (isScanning) return;
-    setIsScanning(true);
-    setScanProgress(0);
-    setShowResult(false);
-
-    const interval = setInterval(() => {
-      setScanProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setIsScanning(false);
-            setShowResult(true);
-
-            // Add to history
-            const newHistoryItem: ScanItem = {
-              id: `scan-${Date.now()}`,
-              date: 'Danas, uzastopni test',
-              fileName: customFile ? customFile.name : `${selectedDoc.title.toLowerCase().replace(/\s+/g, '_')}.jpg`,
-              title: selectedDoc.title,
-              rawBosančicaText: selectedDoc.rawBosančicaText,
-              latinText: editedLines.join(' '),
-              accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
-              durationMs: Math.floor(600 + Math.random() * 800)
-            };
-            onScanCompleted(newHistoryItem);
-
-            if (customFile && customDocuments.length > 1) {
-              customDocuments
-                .filter((item) => item.doc.id !== selectedDoc.id)
-                .forEach((item, index) => {
-                  onScanCompleted({
-                    id: `scan-${Date.now()}-${index + 1}`,
-                    date: 'Danas, uzastopni test',
-                    fileName: item.name,
-                    ...item.doc,
-                    title: item.doc.title,
-                    /* Preserve the source OCR field through the spread above.
-                    rawBosanÄicaText: item.doc.rawBosanÄicaText,
-                    */
-                    latinText: item.doc.latinText,
-                    accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
-                    durationMs: Math.floor(600 + Math.random() * 800)
-                  });
-                });
-            }
-          }, 400);
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 150);
+  const clearProcessTimers = () => {
+    if (processIntervalRef.current !== null) window.clearInterval(processIntervalRef.current);
+    if (processCompletionRef.current !== null) window.clearTimeout(processCompletionRef.current);
+    processIntervalRef.current = null;
+    processCompletionRef.current = null;
   };
+
+  useEffect(() => clearProcessTimers, []);
+
+  const runProcess = (stage: 'segmenting' | 'transliterating', onComplete: () => void) => {
+    clearProcessTimers();
+    setProcessStage(stage);
+    setScanProgress(0);
+    let progress = 0;
+
+    processIntervalRef.current = window.setInterval(() => {
+      progress = Math.min(100, progress + 10);
+      setScanProgress(progress);
+      if (progress < 100) return;
+
+      if (processIntervalRef.current !== null) window.clearInterval(processIntervalRef.current);
+      processIntervalRef.current = null;
+      processCompletionRef.current = window.setTimeout(() => {
+        processCompletionRef.current = null;
+        onComplete();
+      }, 250);
+    }, 140);
+  };
+
+  const startSegmentation = () => {
+    if (processStage !== 'idle') return;
+    onResearcherReviewedChange(false);
+    runProcess('segmenting', () => {
+      setCompletedModels((current) => ({ ...current, segmentationModel: modelName }));
+      setProcessStage('segmented');
+    });
+  };
+
+  const startTransliteration = () => {
+    if (processStage !== 'segmented') return;
+    runProcess('transliterating', () => {
+      setCompletedModels((current) => ({ ...current, transliterationModel: modelName }));
+      setProcessStage('complete');
+
+      const newHistoryItem: ScanItem = {
+        id: `scan-${Date.now()}`,
+        date: 'Danas, uzastopni test',
+        fileName: customFile ? customFile.name : `${selectedDoc.title.toLowerCase().replace(/\s+/g, '_')}.jpg`,
+        title: selectedDoc.title,
+        rawBosančicaText: selectedDoc.rawBosančicaText,
+        latinText: editedLines.join(' '),
+        accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
+        durationMs: Math.floor(600 + Math.random() * 800),
+      };
+      onScanCompleted(newHistoryItem);
+
+      if (customFile && customDocuments.length > 1) {
+        customDocuments
+          .filter((item) => item.doc.id !== selectedDoc.id)
+          .forEach((item, index) => {
+            onScanCompleted({
+              id: `scan-${Date.now()}-${index + 1}`,
+              date: 'Danas, uzastopni test',
+              fileName: item.name,
+              ...item.doc,
+              title: item.doc.title,
+              latinText: item.doc.latinText,
+              accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
+              durationMs: Math.floor(600 + Math.random() * 800),
+            });
+          });
+      }
+    });
+  };
+
+  useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [processStage, selectedDoc, editedLines, customDocuments]);
 
   return (
     <div className={`scan-workflow ${focusDocumentView ? 'scan-workflow--focused' : ''}`}>
@@ -208,13 +268,30 @@ export default function ScanWorkflow({
         <div className="document-meta-panel__main">
           <span>Aktivni dokument</span>
           <h2>{selectedDoc.title}</h2>
-          <p><MapPin size={13} /> {selectedDoc.origin} · {selectedDoc.year}</p>
+          <p className="document-location">
+            <MapPin size={13} />
+            <span>{editedLocation} · {selectedDoc.year}</span>
+            <Button
+              type="button"
+              className="document-location__edit"
+              onClick={() => {
+                setLocationDraft(editedLocation);
+                setLocationModalOpen(true);
+              }}
+              aria-label="Uredi lokaciju"
+              title="Uredi lokaciju"
+            >
+              <Pencil size={12} />
+            </Button>
+          </p>
         </div>
 
         <div className="document-meta-panel__status">
-          <div className="document-meta-panel__progress">
+          <div className="document-meta-panel__progress-heading">
             <span>Napredak obrade</span>
             <strong>{completedStatusCount}/3</strong>
+          </div>
+          <div className="document-meta-panel__progress-track">
             <i style={{ width: `${(completedStatusCount / 3) * 100}%` }} />
           </div>
 
@@ -230,7 +307,6 @@ export default function ScanWorkflow({
 
         <div className="document-meta-panel__facts">
           <span><CalendarClock size={14} /> Obrađeno: {showResult ? processedAt : 'nije pokrenuto'}</span>
-          <span><BadgeCheck size={14} /> Model: {modelName}</span>
           <span><FileText size={14} /> Segmenti: {selectedDoc.lines.length}</span>
         </div>
 
@@ -240,7 +316,7 @@ export default function ScanWorkflow({
       {/* LEFT COLUMN: Preset selector & upload & active file preview */}
       <div className="lg:col-span-5 flex flex-col gap-6">
         {/* PRESET PAPERS */}
-        {!focusDocumentView && (
+        {false && !focusDocumentView && (
         <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
           <legend className="text-xs font-serif font-bold text-[#C5A059] uppercase tracking-[0.2em] mb-4">
             Iskopine i Dokumenti
@@ -293,7 +369,8 @@ export default function ScanWorkflow({
                   onClick={() => {
                     if (isScanning) return;
                     setSelectedDoc(item.doc);
-                    setShowResult(false);
+                    setProcessStage('idle');
+                    setScanProgress(0);
                     setActiveLine(null);
                   }}
                   className={`relative w-16 h-16 shrink-0 rounded-lg overflow-hidden border transition-all ${
@@ -315,12 +392,6 @@ export default function ScanWorkflow({
 
         {/* WORKSPACE PREVIEW FRAME */}
         <div className="relative flex flex-col p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm overflow-hidden flex-1 select-none">
-          <div className="absolute top-4 right-4 z-10 flex gap-2">
-            <span className="px-2 py-0.5 rounded bg-[#0A0A0A] border border-[#2A2A2A] text-[9px] text-[#C5A059]/80 font-mono">
-              Rezolucija: 4K UHD
-            </span>
-          </div>
-
           <p className="text-xs font-serif text-[#C5A059] uppercase tracking-[0.2em] mb-3">
             Vizuelni segmenter ({modelName})
           </p>
@@ -380,33 +451,12 @@ export default function ScanWorkflow({
               <div className="text-center p-6 z-10 max-w-xs">
                 <Layers className="w-10 h-10 text-[#C5A059]/40 mx-auto mb-3" />
                 <p className="text-xs text-stone-300 font-medium font-serif leading-relaxed">
-                  Pritisnite dugme ispod za pokretanje AI segmentacije i prevođenja modelom {modelName}.
+                  {processStage === 'segmented'
+                    ? 'Segmentacija je završena. Pokrenite transliteraciju u zaglavlju.'
+                    : `Pokrenite segmentaciju u zaglavlju za obradu modelom ${modelName}.`}
                 </p>
               </div>
             )}
-          </div>
-
-          <div className="mt-4 flex flex-col sm:flex-row gap-3">
-            <PrimaryButton
-              id="btn-scan-trigger"
-              onClick={handleStartScan}
-              disabled={isScanning}
-              className="flex-1 px-5 py-3.5"
-            >
-              {isScanning ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Skeniranje u toku ({scanProgress}%)</span>
-                </>
-              ) : (
-                <>
-                  <Cpu className="w-4.5 h-4.5" />
-                  <span>
-                    Pokreni AI transliteraciju{customDocuments.length > 1 ? ` (${customDocuments.length} slika)` : ''}
-                  </span>
-                </>
-              )}
-            </PrimaryButton>
           </div>
         </div>
       </div>
@@ -435,16 +485,24 @@ export default function ScanWorkflow({
           {isScanning && (
             <div className="flex-grow flex flex-col items-center justify-center p-10 text-center animate-pulse">
               <RefreshCw className="w-8 h-8 text-[#C5A059] animate-spin mb-4" />
-              <p className="text-sm text-stone-300 font-serif">Dešifrujem ligaturna spajanja...</p>
-              <p className="text-xs text-stone-500 mt-1">Učitavam neuronske parametre za bosansku ćirilicu</p>
+              <p className="text-sm text-stone-300 font-serif">
+                {processStage === 'segmenting' ? 'Segmentiram redove dokumenta...' : 'Dešifrujem ligaturna spajanja...'}
+              </p>
+              <p className="text-xs text-stone-500 mt-1">Napredak obrade: {scanProgress}%</p>
             </div>
           )}
 
           {!isScanning && !showResult && (
             <div className="flex-grow flex flex-col items-center justify-center p-12 text-center text-stone-500">
               <FileText className="w-12 h-12 text-[#2A2A2A] mb-3" />
-              <p className="text-sm font-serif">Čekam aktivaciju skenera...</p>
-              <p className="text-xs text-stone-600 mt-0.5">Odaberite povelju s lijeve strane i pokrenite AI rekonstrukciju</p>
+              <p className="text-sm font-serif">
+                {processStage === 'segmented' ? 'Segmentacija je spremna.' : 'Čekam segmentaciju dokumenta...'}
+              </p>
+              <p className="text-xs text-stone-600 mt-0.5">
+                {processStage === 'segmented'
+                  ? 'Pokrenite transliteraciju iz zaglavlja.'
+                  : 'Pokrenite prvi korak obrade iz zaglavlja.'}
+              </p>
             </div>
           )}
 
@@ -481,9 +539,15 @@ export default function ScanWorkflow({
                           <span className="text-[8px] text-stone-500 font-serif uppercase tracking-widest">
                             Digitalna Bosančica
                           </span>
-                          <p className="text-2xl font-bosanko text-[#C5A059] hover:text-[#D4B069] transition-colors tracking-wide break-words">
-                            <span className="bosanko-glyph">{toBosancicaFontInput(line.textLatinica)}</span>
-                          </p>
+                          <BosancicaHoverText
+                            value={editedLines[idx] ?? line.textLatinica}
+                            onChange={(value) => {
+                              onResearcherReviewedChange(false);
+                              setEditedLines((current) =>
+                                current.map((item, lineIndex) => lineIndex === idx ? value : item)
+                              );
+                            }}
+                          />
                         </div>
 
                         {/* TRANSLATION LATINICA */}
@@ -511,15 +575,15 @@ export default function ScanWorkflow({
               <div className="mt-4 p-4 rounded-xl bg-black/45 border border-[#2A2A2A]">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-stone-400 font-serif">Kompletan Latinični Tekst</span>
-                  <Button
+                  <PrimaryButton
                     onClick={() => {
                       navigator.clipboard.writeText(editedLines.join(' '));
                       alert('Tekst uspješno kopiran u međumemoriju!');
                     }}
-                    className="text-[10px] text-[#C5A059] font-bold hover:text-[#D4B069] cursor-pointer"
+                    className="copy-text-button"
                   >
                     Kopiraj Tekst
-                  </Button>
+                  </PrimaryButton>
                 </div>
                 <p className="text-xs text-[#E0E0E0] leading-relaxed italic">
                   "{editedLines.join(' ')}"
@@ -529,43 +593,50 @@ export default function ScanWorkflow({
           )}
         </div>
 
-        {/* SCAN ARCHIVE HISTORY QUICKVIEW */}
-        <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <History className="w-4.5 h-4.5 text-[#C5A059]" />
-            <h4 className="text-sm font-serif font-semibold text-stone-100">
-              Historija Nedavnih Analiza
-            </h4>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {scansHistory.map((scan) => (
-              <div
-                key={scan.id}
-                className="p-3 rounded-xl bg-black border border-[#2A2A2A] hover:border-[#C5A059]/40 transition-all flex items-center justify-between gap-2 text-xs"
-              >
-                <div className="min-w-0">
-                  <p className="font-serif font-bold text-[#C5A059] truncate mb-0.5">
-                    {scan.title}
-                  </p>
-                  <p className="text-[10px] text-stone-500 truncate">
-                    {scan.fileName} • {scan.date}
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-[10px] text-emerald-400 font-mono font-bold">
-                    {scan.accuracy}% tačnost
-                  </div>
-                  <div className="text-[9px] text-stone-500 font-mono">
-                    {scan.durationMs}ms
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
+
+      {locationModalOpen && (
+        <div className="location-modal" role="presentation" onMouseDown={() => setLocationModalOpen(false)}>
+          <form
+            className="location-modal__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="location-modal-title"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const nextLocation = locationDraft.trim();
+              if (nextLocation) setEditedLocation(nextLocation);
+              setLocationModalOpen(false);
+            }}
+          >
+            <div className="location-modal__header">
+              <div>
+                <span>Podaci dokumenta</span>
+                <h3 id="location-modal-title">Uredi lokaciju</h3>
+              </div>
+              <Button type="button" onClick={() => setLocationModalOpen(false)} aria-label="Zatvori modal">
+                <X size={17} />
+              </Button>
+            </div>
+            <label htmlFor="document-location-input">Lokacija dokumenta</label>
+            <input
+              id="document-location-input"
+              value={locationDraft}
+              onChange={(event) => setLocationDraft(event.target.value)}
+              placeholder="Unesite lokaciju"
+              autoFocus
+            />
+            <div className="location-modal__actions">
+              <Button type="button" onClick={() => setLocationModalOpen(false)}>Odustani</Button>
+              <Button type="submit">Sačuvaj lokaciju</Button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
-}
+});
+
+export default ScanWorkflow;

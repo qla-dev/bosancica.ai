@@ -1,17 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { BOSANCICA_LETTERS } from '../data';
-import { BosancicaLetter, ValidationSample } from '../types';
+import { BosancicaLetter } from '../types';
 import { Award, Check, PenTool, CheckCircle, Link2, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { toBosancicaFontInput } from '../bosancica';
 import Button from './ui/Button';
 import PrimaryButton from './ui/PrimaryButton';
 
-interface LetterArchiveProps {
-  onAddTrainingSample: (sample: ValidationSample) => void;
-}
-
 const getLetterGlyph = (letter: BosancicaLetter) =>
   letter.fontInput ?? toBosancicaFontInput(letter.latinChar.split(/[ /]/)[0]);
+
+const totalLetterExamples = BOSANCICA_LETTERS.reduce((sum, letter) => sum + letter.examplesCount, 0);
 
 interface LetterTileProps {
   key?: React.Key;
@@ -90,7 +88,7 @@ const createSimilarLetterMap = () => {
   return result;
 };
 
-export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProps) {
+export default function LetterArchive() {
   const [selectedLetter, setSelectedLetter] = useState<BosancicaLetter>(BOSANCICA_LETTERS[0]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [similarLetters, setSimilarLetters] = useState<Record<string, string[]>>(createSimilarLetterMap);
@@ -191,22 +189,9 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
     const canvas = canvasRef.current;
     if (!canvas || !hasDrawnContent) return;
 
-    const dataUrl = canvas.toDataURL();
-
-    // Create training sample to bubble up to application state
-    const newSample: ValidationSample = {
-      id: `val-${Date.now()}`,
-      letterId: selectedLetter.id,
-      letterName: `${selectedLetter.charName} (${selectedLetter.latinChar})`,
-      drawnPath: dataUrl,
-      timestamp: 'upravo sada',
-      status: 'pending'
-    };
-
-    onAddTrainingSample(newSample);
     clearCanvas();
 
-    setSuccessMessage(`Hvala! Uzrok za slovo ${selectedLetter.charName} je uspješno poslan u AI red za recenziju kod AI Trenera.`);
+    setSuccessMessage(`Uzorak za slovo ${selectedLetter.charName} uspješno je dodan u trening skup.`);
     setTimeout(() => {
       setSuccessMessage(null);
     }, 5000);
@@ -273,7 +258,7 @@ export default function LetterArchive({ onAddTrainingSample }: LetterArchiveProp
             </div>
             <div>
               <p className="text-xs font-medium text-stone-100">
-                Pronađena i verifikovana 1,385 jedinstvena klesana uzorka u cijelom sistemu
+                Pronađena i verifikovana {totalLetterExamples.toLocaleString('bs-BA')} jedinstvena klesana uzorka u cijelom sistemu
               </p>
               <p className="text-[10px] text-stone-500 mt-0.5">
                 Naša baza raste sakupljanjem i transliteracijom kamenih epigrafa sa stećaka i povelja

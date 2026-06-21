@@ -1,20 +1,9 @@
 import React, { useState } from 'react';
-import { ValidationSample } from '../types';
-import { Cpu, Check, X, ShieldAlert, Sliders, Play, Terminal, Database, LineChart } from 'lucide-react';
-import Button from './ui/Button';
+import { Sliders, Play, Terminal } from 'lucide-react';
+import { toBosancicaFontInput } from '../bosancica';
 import PrimaryButton from './ui/PrimaryButton';
 
-interface TrainerDashboardProps {
-  validationQueue: ValidationSample[];
-  onApproveSample: (id: string) => void;
-  onRejectSample: (id: string) => void;
-}
-
-export default function TrainerDashboard({
-  validationQueue,
-  onApproveSample,
-  onRejectSample
-}: TrainerDashboardProps) {
+export default function TrainerDashboard() {
   // Kraken parameters
   const [threshold, setThreshold] = useState<number>(128);
   const [minWordLength, setMinWordLength] = useState<number>(15);
@@ -26,8 +15,6 @@ export default function TrainerDashboard({
     'Sistem spreman: model bosancica_neural_v1.4.bin učitan.',
     'Svi Kraken alati dostupni u sandbox okruženju.'
   ]);
-  const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
-
   const startMockTraining = () => {
     if (isTraining) return;
     setIsTraining(true);
@@ -62,10 +49,9 @@ export default function TrainerDashboard({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 text-stone-200">
-      {/* LEFT COLUMN: Kraken Tools & Sliders */}
-      <div className="lg:col-span-6 flex flex-col gap-6">
+      <>
         {/* KRAKEN ALATI CARD */}
-        <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md shadow-2xl">
+        <div className="lg:col-span-6 p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md shadow-2xl">
           <div className="flex items-center gap-3 mb-4 pb-3 border-b border-[#2A2A2A]">
             <Sliders className="w-5 h-5 text-[#C5A059]" id="kraken-icon" />
             <div>
@@ -147,9 +133,9 @@ export default function TrainerDashboard({
                     filter: `contrast(${threshold / 100}) grayscale(1)`,
                     letterSpacing: `${dilationCycles * 1.5}px`
                   }}
-                  className="text-3xl font-serif text-[#C5A059] tracking-widest transition-all select-none font-bold"
+                  className="font-bosanko text-4xl text-[#C5A059] tracking-widest transition-all select-none font-normal"
                 >
-                  Ⱆ ⰉⰏⰅ ⰑⰪA Ⰹ
+                  {toBosancicaFontInput('U ime oca i sina')}
                 </p>
                 <div
                   style={{ opacity: minWordLength > 20 ? 0.3 : 1 }}
@@ -165,7 +151,7 @@ export default function TrainerDashboard({
         </div>
 
         {/* AI TRAINING CLI CARD */}
-        <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md flex-1 flex flex-col shadow-2xl">
+        <div className="lg:col-span-6 p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md flex flex-col shadow-2xl">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Terminal className="w-4.5 h-4.5 text-[#C5A059]" />
@@ -208,98 +194,7 @@ export default function TrainerDashboard({
             )}
           </div>
         </div>
-      </div>
-
-      {/* RIGHT COLUMN: User submissions - Tinder swipe or approve/reject list */}
-      <div className="lg:col-span-6 flex flex-col gap-6">
-        <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-md flex-1 flex flex-col shadow-2xl">
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#2A2A2A]">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-[#C5A059]" />
-              <div>
-                <h3 className="text-lg font-serif font-semibold text-stone-100">
-                  Čekaonica za Verifikaciju Pisma
-                </h3>
-                <p className="text-xs text-stone-400">
-                  Odobrite ili odbacite ručne skice korisnika za unutrašnje učenje
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {validationQueue.length === 0 ? (
-            <div className="flex-grow flex flex-col items-center justify-center p-12 text-center text-stone-500 border border-dashed border-[#2A2A2A] rounded-xl my-auto">
-              <Database className="w-12 h-12 text-stone-800 mb-3 animate-pulse" />
-              <p className="text-sm font-serif">Svi uzorci su obrađeni!</p>
-              <p className="text-xs text-stone-600 mt-1 max-w-xs leading-relaxed">
-                Kada korisnici nacrtaju i pošalju svoja slova iz arhive, uzorci će se pojaviti ovdje u realnom vremenu.
-              </p>
-            </div>
-          ) : (
-            <div className="flex-grow flex flex-col gap-4">
-              <span className="text-[10px] font-mono text-[#C5A059] uppercase tracking-[0.2em] font-bold">
-                Uzorci koji čekaju vjerodostojnost ({validationQueue.length})
-              </span>
-
-              <div className="flex flex-col gap-3.5">
-                {validationQueue.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-4 rounded-xl bg-[#0A0A0A] border border-[#2A2A2A] flex items-center justify-between gap-4 transition-all hover:border-[#C5A059]/20"
-                  >
-                    <div className="flex items-center gap-4">
-                      {/* Character image drawn by user */}
-                      <div className="w-16 h-16 rounded bg-black border border-[#2A2A2A] overflow-hidden shrink-0 flex items-center justify-center p-1.5">
-                        {item.drawnPath.startsWith('M') ? (
-                          <svg viewBox="0 0 100 100" className="w-full h-full stroke-[#C5A059] stroke-[5] fill-none">
-                            <path d={item.drawnPath} />
-                          </svg>
-                        ) : (
-                          <img
-                            src={item.drawnPath}
-                            alt="Uzorak slova"
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-contain"
-                          />
-                        )}
-                      </div>
-
-                      <div>
-                        <span className="text-xs font-serif font-bold text-stone-100 block">
-                          Slovo: {item.letterName}
-                        </span>
-                        <span className="text-[10px] text-stone-500 font-sans block mt-0.5">
-                          Prisutnost: {item.timestamp}
-                        </span>
-                        <span className="text-[9px] bg-[#1A1A1A] text-[#C5A059] px-2 py-0.5 rounded border border-[#C5A059]/15 inline-block mt-1 font-mono font-bold">
-                          STATUS: ZAJEDNICA
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-                      <Button
-                        onClick={() => onRejectSample(item.id)}
-                        className="p-2 rounded bg-red-950/40 border border-red-900/40 text-red-400 hover:bg-red-905/60 transition-all cursor-pointer"
-                        title="Odbaci crtež"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        onClick={() => onApproveSample(item.id)}
-                        className="p-2 rounded bg-emerald-900/30 border border-emerald-800/40 text-emerald-400 hover:bg-emerald-900/50 transition-all cursor-pointer"
-                        title="Odobri i integriši u model"
-                      >
-                        <Check className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      </>
     </div>
   );
 }
