@@ -1,5 +1,7 @@
 import express from 'express';
 import { execFile } from 'node:child_process';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +9,22 @@ const app = express();
 const port = Number(process.env.PORT || 8000);
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(root, 'dist');
+const backendApiUrl = new URL(process.env.BACKEND_API_URL || 'http://127.0.0.1:8001');
+
+const hopByHopHeaders = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+const filteredHeaders = (headers) => Object.fromEntries(
+  Object.entries(headers).filter(([key]) => !hopByHopHeaders.has(key.toLowerCase())),
+);
 
 const runCommand = (command, args) => new Promise((resolve, reject) => {
   execFile(command, args, { windowsHide: true, timeout: 5000 }, (error, stdout) => {
@@ -46,6 +64,33 @@ app.get('/api/system/gpu', async (_request, response) => {
   if (!gpu) return response.status(503).json({ error: 'Server GPU data unavailable' });
   return response.json(gpu);
 });
+
+const proxyToBackend = (request, response) => {
+  const target = new URL(request.originalUrl, backendApiUrl);
+  const client = target.protocol === 'https:' ? https : http;
+  const headers = filteredHeaders(request.headers);
+  headers.host = target.host;
+
+  const proxyRequest = client.request(target, {
+    method: request.method,
+    headers,
+  }, (proxyResponse) => {
+    response.writeHead(proxyResponse.statusCode || 502, filteredHeaders(proxyResponse.headers));
+    proxyResponse.pipe(response);
+  });
+
+  proxyRequest.on('error', (error) => {
+    response.status(502).json({
+      error: 'Backend API unavailable',
+      detail: error.message,
+    });
+  });
+
+  request.pipe(proxyRequest);
+};
+
+app.get('/api/health', proxyToBackend);
+app.use('/api/ocr', proxyToBackend);
 
 app.use(express.static(dist, { maxAge: '1y', immutable: true, index: false }));
 app.get('*', (_request, response) => response.sendFile(path.join(dist, 'index.html')));

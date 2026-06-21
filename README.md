@@ -37,16 +37,42 @@ Open http://localhost:8000.
 
 Or run it with Docker Compose from the repository root:
 
+Postgres is not started by Docker Compose. It must already be running directly on
+the server/host and must expose a database Laravel can use. The default Compose
+values expect:
+
+```text
+Host:     host.docker.internal
+Port:     5432
+Database: bosancica
+Username: bosancica
+Password: bosancica_secret
+```
+
+On the Postgres server, create the user/database once:
+
+```sql
+CREATE USER bosancica WITH PASSWORD 'bosancica_secret';
+CREATE DATABASE bosancica OWNER bosancica;
+```
+
+Override the database connection for another server by setting
+`BACKEND_DB_HOST`, `BACKEND_DB_DATABASE`, `BACKEND_DB_USERNAME`, and
+`BACKEND_DB_PASSWORD` in the root `.env` file or in the shell before running
+Compose.
+
+On a Linux server, make sure Postgres accepts connections from the Docker bridge
+network. That usually means `listen_addresses` cannot be limited only to
+`localhost`, and `pg_hba.conf` must allow the Docker subnet/user you configured.
+
 ```powershell
-docker network inspect bosancica_network *> $null
-if ($LASTEXITCODE -ne 0) { docker network create bosancica_network }
-docker compose -f frontend/docker-compose.yml up --build
+docker compose up --build
 ```
 
 Stop it with:
 
 ```powershell
-docker compose -f frontend/docker-compose.yml down
+docker compose down
 ```
 
 ## Expose with port forwarding
