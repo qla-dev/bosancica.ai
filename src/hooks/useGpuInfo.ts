@@ -4,6 +4,7 @@ export type GpuDetectionStatus = 'detecting' | 'detected' | 'masked' | 'software
 
 export interface GpuInfo {
   name: string;
+  memoryMb?: number;
   status: GpuDetectionStatus;
   statusLabel: string;
 }
@@ -50,8 +51,25 @@ export default function useGpuInfo() {
   });
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setGpuInfo(detectBrowserGpu()));
-    return () => window.cancelAnimationFrame(frame);
+    const controller = new AbortController();
+    const detect = async () => {
+      try {
+        const response = await fetch('/api/system/gpu', { signal: controller.signal });
+        if (!response.ok) throw new Error('Local GPU endpoint unavailable');
+        const localGpu = await response.json() as { name?: string; memoryMb?: number };
+        if (!localGpu.name) throw new Error('GPU name unavailable');
+        setGpuInfo({
+          name: localGpu.name,
+          memoryMb: localGpu.memoryMb,
+          status: 'detected',
+          statusLabel: 'GPU spreman',
+        });
+      } catch {
+        if (!controller.signal.aborted) setGpuInfo(detectBrowserGpu());
+      }
+    };
+    void detect();
+    return () => controller.abort();
   }, []);
 
   return gpuInfo;

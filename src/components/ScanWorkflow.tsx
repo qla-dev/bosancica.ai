@@ -12,6 +12,7 @@ interface ScanWorkflowProps {
   scansHistory: ScanItem[];
   initialFiles?: File[];
   initialPresetId?: string | null;
+  initialDocumentName?: string;
   modelName?: string;
 }
 
@@ -20,6 +21,7 @@ export default function ScanWorkflow({
   scansHistory,
   initialFiles = [],
   initialPresetId,
+  initialDocumentName,
   modelName = 'Kraken BVision OCR',
 }: ScanWorkflowProps) {
   const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(PRESET_DOCUMENTS[0]);
@@ -38,10 +40,22 @@ export default function ScanWorkflow({
   };
 
   const makeCustomDocument = (file: File, index: number) => {
-      const fakeUrl = URL.createObjectURL(file);
+      const isImage = file.type.startsWith('image/');
+      const fakeUrl = isImage
+        ? URL.createObjectURL(file)
+        : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1300" viewBox="0 0 1000 1300">
+              <rect width="1000" height="1300" fill="#d6c49f"/>
+              <rect x="90" y="90" width="820" height="1120" rx="20" fill="#eee3ca" stroke="#8f7952" stroke-width="5"/>
+              <text x="500" y="590" text-anchor="middle" font-family="serif" font-size="150" fill="#6f5834">PDF</text>
+              <text x="500" y="690" text-anchor="middle" font-family="sans-serif" font-size="34" fill="#77684d">${file.name.replace(/[<>&]/g, '')}</text>
+            </svg>
+          `)}`;
       const fakeDoc: PresetDocument = {
         id: `custom-${file.lastModified}-${index}`,
-        title: file.name.substring(0, 24) || 'Uvezeni dokument d.b',
+        title: initialDocumentName
+          ? `${initialDocumentName}${initialFiles.length > 1 ? ` · ${index + 1}` : ''}`
+          : file.name.substring(0, 24) || 'Uvezeni dokument',
         year: 'Nepoznat period',
         origin: 'Učitano sa lokalnog računara',
         imageUrl: fakeUrl,
@@ -66,7 +80,9 @@ export default function ScanWorkflow({
   };
 
   const loadCustomFiles = (files: File[]) => {
-      const documents = files.filter((file) => file.type.startsWith('image/')).map(makeCustomDocument);
+      const documents = files
+        .filter((file) => file.type.startsWith('image/') || file.type === 'application/pdf')
+        .map(makeCustomDocument);
       if (!documents.length) return;
       setCustomDocuments(documents);
       setSelectedDoc(documents[0].doc);

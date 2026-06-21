@@ -6,10 +6,10 @@ import {
   Bot,
   Check,
   ChevronDown,
+  FileText,
   History,
-  FileImage,
-  Gauge,
-  Menu,
+  Image as ImageIcon,
+  Images,
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,10 +17,7 @@ import {
   ScanLine,
   Settings,
   ShieldCheck,
-  Server,
-  Upload,
   UserRound,
-  X,
 } from 'lucide-react';
 import { MOCK_HISTORY, MOCK_VALIDATION_SAMPLES, PRESET_DOCUMENTS } from './data';
 import { ScanItem, ValidationSample } from './types';
@@ -60,17 +57,29 @@ const modelOptions: Array<{
   },
 ];
 
+const HOME_GREETINGS = [
+  'Zdravo, istraživaču. Na kojem dokumentu radimo danas?',
+  'Koji trag prošlosti danas čitamo?',
+  'Spremni za novu transliteraciju?',
+  'Donesite dokument. Otkrijmo šta u njemu piše.',
+  'Koju ćemo stranicu historije danas otvoriti?',
+  'Novi dokument, nova priča. Počnimo.',
+];
+
 export default function App() {
   const gpuInfo = useGpuInfo();
+  const [greetingIndex, setGreetingIndex] = useState(() => Math.floor(Math.random() * HOME_GREETINGS.length));
   const [workspace, setWorkspace] = useState<Workspace>('home');
   const [selectedModel, setSelectedModel] = useState(modelOptions[0].id);
   const [pendingUploads, setPendingUploads] = useState<File[]>([]);
+  const [documentName, setDocumentName] = useState('');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [documentSelectionNonce, setDocumentSelectionNonce] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
   const [validationQueue, setValidationQueue] = useState<ValidationSample[]>(MOCK_VALIDATION_SAMPLES);
@@ -83,13 +92,17 @@ export default function App() {
   );
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-  const homeFileInputRef = useRef<HTMLInputElement>(null);
+  const singleImageInputRef = useRef<HTMLInputElement>(null);
+  const multiImageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const uploadMenuRef = useRef<HTMLDivElement>(null);
   const mainShellRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!modeMenuRef.current?.contains(target)) setModeMenuOpen(false);
+      if (!uploadMenuRef.current?.contains(target)) setUploadMenuOpen(false);
       if (!profileMenuRef.current?.contains(target)) setProfileMenuOpen(false);
     };
     document.addEventListener('mousedown', closeMenus);
@@ -107,18 +120,31 @@ export default function App() {
     setModeMenuOpen(false);
   };
 
+  const toggleSidebar = () => {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      setSidebarCollapsed((value) => !value);
+    } else {
+      setMobileSidebarOpen((value) => !value);
+    }
+  };
+
   const startNewConversation = () => {
     setPendingUploads([]);
+    setDocumentName('');
     setSelectedPresetId(null);
+    setGreetingIndex((current) => (current + 1) % HOME_GREETINGS.length);
     navigate('home');
   };
 
   const openUploadedDocuments = (files: File[]) => {
-    const images = files.filter((file) => file.type.startsWith('image/'));
-    if (!images.length) return;
-    const title = images.length === 1 ? images[0].name : `${images[0].name} + ${images.length - 1}`;
-    const item: RecentDocument = { id: `upload-${Date.now()}`, title, files: images };
-    setPendingUploads(images);
+    const supportedFiles = files.filter((file) => file.type.startsWith('image/') || file.type === 'application/pdf');
+    if (!supportedFiles.length) return;
+    const fallbackTitle = supportedFiles.length === 1
+      ? supportedFiles[0].name
+      : `${supportedFiles[0].name} + ${supportedFiles.length - 1}`;
+    const title = documentName.trim() || fallbackTitle;
+    const item: RecentDocument = { id: `upload-${Date.now()}`, title, files: supportedFiles };
+    setPendingUploads(supportedFiles);
     setSelectedPresetId(null);
     setDocumentSelectionNonce((value) => value + 1);
     setRecentDocuments((current) => [item, ...current].slice(0, 7));
@@ -126,6 +152,7 @@ export default function App() {
   };
 
   const openRecentDocument = (document: RecentDocument) => {
+    setDocumentName(document.title);
     setPendingUploads([...(document.files ?? [])]);
     setSelectedPresetId(document.presetId ?? null);
     setDocumentSelectionNonce((value) => value + 1);
@@ -170,20 +197,6 @@ export default function App() {
               </span>
             )}
           </Button>
-          <IconButton
-            className="icon-button hidden lg:grid"
-            onClick={() => setSidebarCollapsed((value) => !value)}
-            aria-label={sidebarCollapsed ? 'Proširi navigaciju' : 'Sakrij navigaciju'}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </IconButton>
-          <IconButton
-            className="icon-button lg:hidden"
-            onClick={() => setMobileSidebarOpen(false)}
-            aria-label="Zatvori navigaciju"
-          >
-            <X size={19} />
-          </IconButton>
         </div>
 
         <Button className="new-chat-button" onClick={startNewConversation}>
@@ -256,11 +269,16 @@ export default function App() {
       <section ref={mainShellRef} className="main-shell">
         <header className="topbar">
           <IconButton
-            className="icon-button lg:hidden"
-            onClick={() => setMobileSidebarOpen(true)}
-            aria-label="Otvori navigaciju"
+            className="icon-button"
+            onClick={toggleSidebar}
+            aria-label="Prikaži ili sakrij navigaciju"
           >
-            <Menu size={20} />
+            <span className="hidden lg:grid place-items-center">
+              {sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
+            </span>
+            <span className="grid lg:hidden place-items-center">
+              {mobileSidebarOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}
+            </span>
           </IconButton>
 
           <div className="topbar__title">
@@ -268,9 +286,18 @@ export default function App() {
             <strong>{workspaceMeta[workspace].label}</strong>
           </div>
 
-          <div className="topbar__status">
-            <span className="status-dot" />
-            <span>OCR sistem spreman</span>
+          <div className="topbar__gpu">
+            <i />
+            <div>
+              <small>GPU spreman</small>
+              <strong>
+                {gpuInfo.name}
+                {gpuInfo.memoryMb && gpuInfo.memoryMb > 0 ? ` · ${(gpuInfo.memoryMb / 1024).toFixed(1)} GB VRAM` : ''}
+              </strong>
+            </div>
+            <div className="mini-meter" aria-label={gpuInfo.statusLabel}>
+              <span /><span /><span /><span />
+            </div>
           </div>
         </header>
 
@@ -285,9 +312,36 @@ export default function App() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.28 }}
               >
-                <div className="upload-panel">
+                <AnimatePresence mode="wait">
+                  <motion.h1
+                    key={greetingIndex}
+                    className="home-greeting"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.22 }}
+                  >
+                    {HOME_GREETINGS[greetingIndex]}
+                  </motion.h1>
+                </AnimatePresence>
+                <div
+                  className={`upload-panel upload-composer ${isDragging ? 'is-dragging' : ''}`}
+                  onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                >
                   <input
-                    ref={homeFileInputRef}
+                    ref={singleImageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(event) => {
+                      if (event.target.files) openUploadedDocuments(Array.from(event.target.files));
+                    }}
+                  />
+                  <input
+                    ref={multiImageInputRef}
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
                     multiple
@@ -296,28 +350,62 @@ export default function App() {
                       if (event.target.files) openUploadedDocuments(Array.from(event.target.files));
                     }}
                   />
-                  <Button
-                    type="button"
-                    className={`upload-dropzone ${isDragging ? 'is-dragging' : ''}`}
-                    onClick={() => homeFileInputRef.current?.click()}
-                    onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDragLeave={() => setIsDragging(false)}
-                    onDrop={handleDrop}
-                  >
-                    <span className="upload-dropzone__icon"><FileImage size={30} /></span>
-                    <strong>Prevucite dokumente ovdje</strong>
-                    <small>jedna fotografija ili cijeli niz stranica</small>
-                    <em><Upload size={15} /> Odaberi slike</em>
-                    <span className="upload-dropzone__formats">PNG, JPG ili WEBP · multiple upload</span>
-                  </Button>
+                  <input
+                    ref={documentInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={(event) => {
+                      if (event.target.files) openUploadedDocuments(Array.from(event.target.files));
+                    }}
+                  />
+                  <div className="home-composer__attach-wrap" ref={uploadMenuRef}>
+                    <Button
+                      className="home-composer__attach"
+                      onClick={() => setUploadMenuOpen((value) => !value)}
+                      aria-label="Odaberi način dodavanja dokumenta"
+                      aria-expanded={uploadMenuOpen}
+                    >
+                      <Plus size={25} />
+                      <i />
+                    </Button>
+                    <AnimatePresence>
+                      {uploadMenuOpen && (
+                        <motion.div
+                          className="upload-source-menu"
+                          initial={{ opacity: 0, y: 8, scale: .98 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 8, scale: .98 }}
+                          transition={{ duration: .16 }}
+                        >
+                          <span className="upload-source-menu__label">Dodaj izvor</span>
+                          <Button onClick={() => { setUploadMenuOpen(false); singleImageInputRef.current?.click(); }}>
+                            <span className="upload-source-menu__icon"><ImageIcon size={18} /></span>
+                            <span><strong>Dodaj jednu sliku</strong><small>Jedna stranica ili natpis</small><em>PNG · JPG · WEBP</em></span>
+                          </Button>
+                          <Button onClick={() => { setUploadMenuOpen(false); multiImageInputRef.current?.click(); }}>
+                            <span className="upload-source-menu__icon"><Images size={18} /></span>
+                            <span><strong>Dodaj više slika</strong><small>Batch stranica istog dokumenta</small><em>PNG · JPG · WEBP</em></span>
+                          </Button>
+                          <Button onClick={() => { setUploadMenuOpen(false); documentInputRef.current?.click(); }}>
+                            <span className="upload-source-menu__icon"><FileText size={18} /></span>
+                            <span><strong>Dodaj dokument</strong><small>Učitaj digitalni dokument</small><em>PDF</em></span>
+                          </Button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <input
+                    value={documentName}
+                    onChange={(event) => setDocumentName(event.target.value)}
+                    placeholder="Upišite ime dokumenta…"
+                    maxLength={80}
+                    aria-label="Ime dokumenta"
+                    className="home-composer__input"
+                    autoFocus
+                  />
 
-                  <div className="model-row">
-                    <div>
-                      <strong>Model za obradu</strong>
-                      <small>Odaberite AI model koji će čitati dokument</small>
-                    </div>
-                    <div className="mode-picker" ref={modeMenuRef}>
+                  <div className="mode-picker home-composer__model" ref={modeMenuRef}>
                       <AnimatePresence>
                         {modeMenuOpen && (
                           <motion.div
@@ -351,29 +439,15 @@ export default function App() {
                       </AnimatePresence>
                       <Button
                         type="button"
-                        className="model-picker__trigger"
+                        className="home-model-trigger"
                         onClick={() => setModeMenuOpen((value) => !value)}
+                        aria-expanded={modeMenuOpen}
                       >
-                        <span className="model-picker__mark"><Bot size={17} /></span>
-                        <span><strong>{activeModel.label}</strong><small>{activeModel.description}</small></span>
+                        <span>{activeModel.label}</span>
                         <ChevronDown size={15} />
                       </Button>
-                    </div>
                   </div>
 
-                  <div className="gpu-card">
-                    <span className="gpu-card__server"><Server size={18} /></span>
-                    <div className="gpu-card__identity">
-                      <span><i /> GPU ovog uređaja</span>
-                      <strong>{gpuInfo.name}</strong>
-                    </div>
-                    <div className="gpu-card__meter" aria-label="Grafička aktivna">
-                      <span /><span /><span /><span /><span />
-                    </div>
-                    <div className={`gpu-card__state gpu-card__state--${gpuInfo.status}`}>
-                      <Gauge size={14} /><span>{gpuInfo.statusLabel}</span>
-                    </div>
-                  </div>
                 </div>
 
                 <p className="upload-home__note"><ShieldCheck size={13} /> Dokument se obrađuje sigurno i ne pohranjuje bez vaše dozvole.</p>
@@ -418,11 +492,6 @@ export default function App() {
                           <ChevronDown size={14} />
                         </Button>
                       </div>
-                      <div className="transcription-modelbar__gpu">
-                        <i />
-                        <div><small>GPU ovog uređaja</small><strong>{gpuInfo.name}</strong></div>
-                        <div className="mini-meter"><span /><span /><span /><span /></div>
-                      </div>
                     </div>
                     <ScanWorkflow
                       key={`scanner-${documentSelectionNonce}`}
@@ -430,6 +499,7 @@ export default function App() {
                       scansHistory={scansHistory}
                       initialFiles={pendingUploads}
                       initialPresetId={selectedPresetId}
+                      initialDocumentName={documentName.trim()}
                       modelName={activeModel.label}
                     />
                   </>
