@@ -258,10 +258,10 @@ export default function LetterArchive() {
             </div>
             <div>
               <p className="text-xs font-medium text-stone-100">
-                Pronađena i verifikovana {totalLetterExamples.toLocaleString('bs-BA')} jedinstvena klesana uzorka u cijelom sistemu
+                Pronađena i verifikovana {totalLetterExamples.toLocaleString('bs-BA')} jedinstvena uzorka u cijelom sistemu
               </p>
               <p className="text-[10px] text-stone-500 mt-0.5">
-                Naša baza raste sakupljanjem i transliteracijom kamenih epigrafa sa stećaka i povelja
+                Naša baza raste sakupljanjem i procesuiranjem doprinosa iz zajednice, a svaki primjerak pomaže u treniranju AI modela za prepoznavanje i generisanje bosančice.
               </p>
             </div>
           </div>
