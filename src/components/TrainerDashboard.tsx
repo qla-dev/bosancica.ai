@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ValidationSample } from '../types';
 import { Cpu, Check, X, ShieldAlert, Sliders, Play, Terminal, Database, LineChart } from 'lucide-react';
 import Button from './ui/Button';
+import PrimaryButton from './ui/PrimaryButton';
 
 interface TrainerDashboardProps {
   validationQueue: ValidationSample[];
@@ -172,14 +173,14 @@ export default function TrainerDashboard({
                 Pogon za Treniranje Neuralnog Modela
               </h4>
             </div>
-            <Button
+            <PrimaryButton
               onClick={startMockTraining}
               disabled={isTraining}
-              className="px-4 py-2 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2"
             >
-              <Play className="w-3.5 h-3.5 fill-white text-white" />
+              <Play className="w-3.5 h-3.5 fill-current" />
               <span>{isTraining ? 'Fino učenje...' : 'Treniraj Model'}</span>
-            </Button>
+            </PrimaryButton>
           </div>
 
           <div

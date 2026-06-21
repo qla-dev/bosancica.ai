@@ -156,7 +156,7 @@ export const BOSANCICA_LETTERS: BosancicaLetter[] = BOSANCICA_ARCHIVE_DEFINITION
     latinChar,
     fontInput,
     svgPath: '',
-    description: `Arhivski oblik bosančičnog znaka ${latinChar}, prikazan izvornim BoSanko2 fontom.`,
+    description: '',
     variants: ['Standardni rukopisni oblik'],
     examplesCount: 48 + ((index * 17) % 129),
   }),

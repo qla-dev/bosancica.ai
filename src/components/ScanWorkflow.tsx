@@ -3,8 +3,9 @@ import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
 import { toBosancicaFontInput } from '../bosancica';
 import EditableLatinText from './EditableLatinText';
-import { BadgeCheck, CalendarClock, Cpu, FileText, CheckCircle2, History, MapPin, RefreshCw, Layers, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, CalendarClock, Cpu, FileText, CheckCircle2, History, MapPin, RefreshCw, Layers } from 'lucide-react';
 import Button from './ui/Button';
+import PrimaryButton from './ui/PrimaryButton';
 
 interface ScanWorkflowProps {
   key?: string;
@@ -15,6 +16,9 @@ interface ScanWorkflowProps {
   initialDocumentName?: string;
   modelName?: string;
   focusDocumentView?: boolean;
+  researcherReviewed: boolean;
+  onResearcherReviewedChange: (reviewed: boolean) => void;
+  onReviewAvailabilityChange: (available: boolean) => void;
 }
 
 export default function ScanWorkflow({
@@ -25,6 +29,9 @@ export default function ScanWorkflow({
   initialDocumentName,
   modelName = 'Kraken BVision OCR',
   focusDocumentView = false,
+  researcherReviewed,
+  onResearcherReviewedChange,
+  onReviewAvailabilityChange,
 }: ScanWorkflowProps) {
   const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(PRESET_DOCUMENTS[0]);
   const [editedLines, setEditedLines] = useState<string[]>(() => PRESET_DOCUMENTS[0].lines.map((line) => line.textLatinica));
@@ -33,7 +40,6 @@ export default function ScanWorkflow({
   const [showResult, setShowResult] = useState(true);
   const [activeLine, setActiveLine] = useState<number | null>(null);
   const [customDocuments, setCustomDocuments] = useState<Array<{ name: string; url: string; doc: PresetDocument }>>([]);
-  const [researcherReviewed, setResearcherReviewed] = useState(false);
   const [processedAt] = useState(() =>
     new Intl.DateTimeFormat('bs-BA', {
       day: '2-digit',
@@ -49,7 +55,7 @@ export default function ScanWorkflow({
     setSelectedDoc(doc);
     setShowResult(true);
     setActiveLine(null);
-    setResearcherReviewed(false);
+    onResearcherReviewedChange(false);
   };
 
   const makeCustomDocument = (file: File, index: number) => {
@@ -101,7 +107,7 @@ export default function ScanWorkflow({
       setSelectedDoc(documents[0].doc);
       setShowResult(false);
       setActiveLine(null);
-      setResearcherReviewed(false);
+      onResearcherReviewedChange(false);
   };
 
   useEffect(() => {
@@ -116,8 +122,12 @@ export default function ScanWorkflow({
 
   useEffect(() => {
     setEditedLines(selectedDoc.lines.map((line) => line.textLatinica));
-    setResearcherReviewed(false);
-  }, [selectedDoc]);
+    onResearcherReviewedChange(false);
+  }, [onResearcherReviewedChange, selectedDoc]);
+
+  useEffect(() => {
+    onReviewAvailabilityChange(showResult && !isScanning);
+  }, [isScanning, onReviewAvailabilityChange, showResult]);
 
   const customFile = customDocuments.find((item) => item.doc.id === selectedDoc.id) ?? null;
   const segmentationComplete = showResult || scanProgress >= 45;
@@ -224,15 +234,6 @@ export default function ScanWorkflow({
           <span><FileText size={14} /> Segmenti: {selectedDoc.lines.length}</span>
         </div>
 
-        <Button
-          type="button"
-          disabled={!showResult || isScanning}
-          onClick={() => setResearcherReviewed(true)}
-          className={`document-review-button ${researcherReviewed ? 'is-complete' : ''}`}
-        >
-          <ShieldCheck size={15} />
-          {researcherReviewed ? 'Kontrola potvrđena' : 'Označi kontrolu'}
-        </Button>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -386,26 +387,26 @@ export default function ScanWorkflow({
           </div>
 
           <div className="mt-4 flex flex-col sm:flex-row gap-3">
-            <Button
+            <PrimaryButton
               id="btn-scan-trigger"
               onClick={handleStartScan}
               disabled={isScanning}
-              className="flex-1 flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#C5A059] hover:bg-[#D4B069] disabled:bg-stone-850 disabled:text-stone-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-[0.98] cursor-pointer"
+              className="flex-1 px-5 py-3.5"
             >
               {isScanning ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  <RefreshCw className="w-4 h-4 animate-spin" />
                   <span>Skeniranje u toku ({scanProgress}%)</span>
                 </>
               ) : (
                 <>
-                  <Cpu className="w-4.5 h-4.5 text-white" />
+                  <Cpu className="w-4.5 h-4.5" />
                   <span>
                     Pokreni AI transliteraciju{customDocuments.length > 1 ? ` (${customDocuments.length} slika)` : ''}
                   </span>
                 </>
               )}
-            </Button>
+            </PrimaryButton>
           </div>
         </div>
       </div>
@@ -481,7 +482,7 @@ export default function ScanWorkflow({
                             Digitalna Bosančica
                           </span>
                           <p className="text-2xl font-bosanko text-[#C5A059] hover:text-[#D4B069] transition-colors tracking-wide break-words">
-                            {toBosancicaFontInput(line.textLatinica)}
+                            <span className="bosanko-glyph">{toBosancicaFontInput(line.textLatinica)}</span>
                           </p>
                         </div>
 
@@ -493,7 +494,7 @@ export default function ScanWorkflow({
                           <EditableLatinText
                             value={editedLines[idx] ?? line.textLatinica}
                             onChange={(value) => {
-                              setResearcherReviewed(false);
+                              onResearcherReviewedChange(false);
                               setEditedLines((current) =>
                                 current.map((item, lineIndex) => lineIndex === idx ? value : item)
                               );

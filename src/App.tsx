@@ -1,4 +1,4 @@
-import { DragEvent, FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Archive,
@@ -16,6 +16,7 @@ import {
   Plus,
   Settings,
   ShieldCheck,
+  Upload,
   UserRound,
 } from 'lucide-react';
 import { MOCK_HISTORY, MOCK_VALIDATION_SAMPLES, PRESET_DOCUMENTS } from './data';
@@ -25,6 +26,7 @@ import LetterArchive from './components/LetterArchive';
 import TrainerDashboard from './components/TrainerDashboard';
 import Button from './components/ui/Button';
 import IconButton from './components/ui/IconButton';
+import PrimaryButton from './components/ui/PrimaryButton';
 import useGpuInfo from './hooks/useGpuInfo';
 
 type Workspace = 'home' | 'scanner' | 'archive' | 'trainer';
@@ -76,9 +78,37 @@ const LOGIN_CREDENTIALS = {
   password: 'Qla.dev2026!',
 };
 
+const AUTH_SESSION_STORAGE_KEY = 'bosancica.auth-session';
+const AUTH_SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
+
+const readAuthSessionExpiration = () => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const storedSession = window.localStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+    if (!storedSession) return null;
+
+    const session = JSON.parse(storedSession) as { expiresAt?: unknown };
+    if (
+      typeof session.expiresAt !== 'number'
+      || !Number.isFinite(session.expiresAt)
+      || session.expiresAt <= Date.now()
+    ) {
+      window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      return null;
+    }
+
+    return session.expiresAt;
+  } catch {
+    window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    return null;
+  }
+};
+
 export default function App() {
   const gpuInfo = useGpuInfo();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authSessionExpiresAt, setAuthSessionExpiresAt] = useState<number | null>(readAuthSessionExpiration);
+  const isAuthenticated = authSessionExpiresAt !== null;
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -90,6 +120,8 @@ export default function App() {
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [documentSelectionNonce, setDocumentSelectionNonce] = useState(0);
   const [documentFocusMode, setDocumentFocusMode] = useState(false);
+  const [researcherReviewed, setResearcherReviewed] = useState(false);
+  const [reviewAvailable, setReviewAvailable] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -112,6 +144,25 @@ export default function App() {
   const documentInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
   const mainShellRef = useRef<HTMLElement>(null);
+  const dragDepthRef = useRef(0);
+
+  useEffect(() => {
+    if (authSessionExpiresAt === null) return;
+
+    const remainingDuration = authSessionExpiresAt - Date.now();
+    if (remainingDuration <= 0) {
+      window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      setAuthSessionExpiresAt(null);
+      return;
+    }
+
+    const expirationTimer = window.setTimeout(() => {
+      window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      setAuthSessionExpiresAt(null);
+    }, remainingDuration);
+
+    return () => window.clearTimeout(expirationTimer);
+  }, [authSessionExpiresAt]);
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
@@ -148,6 +199,8 @@ export default function App() {
     setDocumentName('');
     setSelectedPresetId(null);
     setDocumentFocusMode(false);
+    setResearcherReviewed(false);
+    setReviewAvailable(true);
     setGreetingIndex((current) => (current + 1) % HOME_GREETINGS.length);
     navigate('home');
   };
@@ -163,24 +216,79 @@ export default function App() {
     setPendingUploads(supportedFiles);
     setSelectedPresetId(null);
     setDocumentFocusMode(false);
+    setResearcherReviewed(false);
+    setReviewAvailable(false);
     setDocumentSelectionNonce((value) => value + 1);
     setRecentDocuments((current) => [item, ...current].slice(0, 7));
     navigate('scanner');
   };
+
+  useEffect(() => {
+    if (!isAuthenticated || workspace !== 'home') {
+      dragDepthRef.current = 0;
+      setIsDragging(false);
+      return;
+    }
+
+    const containsFiles = (event: globalThis.DragEvent) => (
+      Array.from(event.dataTransfer?.types ?? []).includes('Files')
+    );
+
+    const handleDragEnter = (event: globalThis.DragEvent) => {
+      if (!containsFiles(event)) return;
+      event.preventDefault();
+      dragDepthRef.current += 1;
+      setIsDragging(true);
+    };
+
+    const handleDragOver = (event: globalThis.DragEvent) => {
+      if (!containsFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+
+    const handleDragLeave = () => {
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) setIsDragging(false);
+    };
+
+    const resetDragState = () => {
+      dragDepthRef.current = 0;
+      setIsDragging(false);
+    };
+
+    const handleWindowDrop = (event: globalThis.DragEvent) => {
+      if (!containsFiles(event)) return;
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      resetDragState();
+      openUploadedDocuments(files);
+    };
+
+    window.addEventListener('dragenter', handleDragEnter);
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleWindowDrop);
+    window.addEventListener('dragend', resetDragState);
+
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleWindowDrop);
+      window.removeEventListener('dragend', resetDragState);
+    };
+  }, [documentName, isAuthenticated, workspace]);
 
   const openRecentDocument = (document: RecentDocument) => {
     setDocumentName(document.title);
     setPendingUploads([...(document.files ?? [])]);
     setSelectedPresetId(document.presetId ?? null);
     setDocumentFocusMode(true);
+    setResearcherReviewed(false);
+    setReviewAvailable(!document.files?.length);
     setDocumentSelectionNonce((value) => value + 1);
     navigate('scanner');
-  };
-
-  const handleDrop = (event: DragEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    setIsDragging(false);
-    openUploadedDocuments(Array.from(event.dataTransfer.files));
   };
 
   const activeModel = modelOptions.find((option) => option.id === selectedModel) ?? modelOptions[0];
@@ -195,7 +303,9 @@ export default function App() {
       loginUsername.trim() === LOGIN_CREDENTIALS.username
       && loginPassword === LOGIN_CREDENTIALS.password
     ) {
-      setIsAuthenticated(true);
+      const expiresAt = Date.now() + AUTH_SESSION_DURATION_MS;
+      window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ expiresAt }));
+      setAuthSessionExpiresAt(expiresAt);
       setLoginError('');
       setLoginPassword('');
       return;
@@ -276,6 +386,32 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {isAuthenticated && workspace === 'home' && isDragging && (
+          <motion.div
+            className="global-drop-overlay"
+            role="status"
+            aria-live="polite"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+          >
+            <motion.div
+              className="global-drop-overlay__frame"
+              initial={{ scale: 0.99 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.2 }}
+            >
+              <span className="global-drop-overlay__icon"><Upload size={30} /></span>
+              <strong>Pustite dokument bilo gdje</strong>
+              <small>Slike i PDF dokumenti spremni su za obradu</small>
+              <span className="global-drop-overlay__formats">PNG · JPG · WEBP · PDF</span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {mobileSidebarOpen && (
           <motion.button
             aria-label="Zatvori navigaciju"
@@ -305,10 +441,10 @@ export default function App() {
           </Button>
         </div>
 
-        <Button className="new-chat-button" onClick={startNewConversation}>
+        <PrimaryButton className="new-chat-button" onClick={startNewConversation}>
           <Plus size={18} />
           {!sidebarCollapsed && <span>Novi dokument</span>}
-        </Button>
+        </PrimaryButton>
 
         <nav className="sidebar__nav" aria-label="Glavna navigacija">
           <Button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
@@ -389,7 +525,11 @@ export default function App() {
           <div className="topbar__gpu">
             <i />
             <div>
-              <small>GPU spreman</small>
+              <small>
+                {gpuInfo.status === 'detected' ? (
+                  <>GPU spreman na <span className="topbar__server-name">qla.dev</span> serveru</>
+                ) : gpuInfo.statusLabel}
+              </small>
               <strong>
                 {gpuInfo.name}
                 {gpuInfo.memoryMb && gpuInfo.memoryMb > 0 ? ` · ${(gpuInfo.memoryMb / 1024).toFixed(1)} GB VRAM` : ''}
@@ -425,11 +565,7 @@ export default function App() {
                   </motion.h1>
                 </AnimatePresence>
                 <div
-                  className={`upload-panel upload-composer ${isDragging ? 'is-dragging' : ''}`}
-                  onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={handleDrop}
+                  className={`upload-composer ${isDragging ? 'is-dragging' : ''}`}
                 >
                   <input
                     ref={singleImageInputRef}
@@ -603,6 +739,18 @@ export default function App() {
                           <span>AI model v1.4</span>
                         </div>
                       </div>
+                      <Button
+                        type="button"
+                        disabled={!reviewAvailable}
+                        onClick={() => setResearcherReviewed(true)}
+                        className={`transcription-modelbar__review ${researcherReviewed ? 'is-complete' : ''}`}
+                      >
+                        <ShieldCheck size={16} />
+                        <div>
+                          <small>Kontrola istraživača</small>
+                          <strong>{researcherReviewed ? 'Kontrola potvrđena' : 'Označi kontrolu'}</strong>
+                        </div>
+                      </Button>
                     </div>
                     <ScanWorkflow
                       key={`scanner-${documentSelectionNonce}`}
@@ -613,6 +761,9 @@ export default function App() {
                       initialDocumentName={documentName.trim()}
                       modelName={activeModel.label}
                       focusDocumentView={documentFocusMode}
+                      researcherReviewed={researcherReviewed}
+                      onResearcherReviewedChange={setResearcherReviewed}
+                      onReviewAvailabilityChange={setReviewAvailable}
                     />
                   </>
                 )}
