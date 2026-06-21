@@ -361,7 +361,7 @@ export default function App() {
                       setLoginError('');
                     }}
                     autoComplete="username"
-                    placeholder="qla.dev"
+                    placeholder="Unesite korisničko ime"
                     aria-label="Korisničko ime"
                   />
                 </label>
