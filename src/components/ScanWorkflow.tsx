@@ -3,7 +3,7 @@ import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
 import { toBosancicaFontInput } from '../bosancica';
 import EditableLatinText from './EditableLatinText';
-import { Cpu, FileText, CheckCircle2, History, RefreshCw, Layers } from 'lucide-react';
+import { BadgeCheck, CalendarClock, Cpu, FileText, CheckCircle2, History, MapPin, RefreshCw, Layers, ShieldCheck } from 'lucide-react';
 import Button from './ui/Button';
 
 interface ScanWorkflowProps {
@@ -14,6 +14,7 @@ interface ScanWorkflowProps {
   initialPresetId?: string | null;
   initialDocumentName?: string;
   modelName?: string;
+  focusDocumentView?: boolean;
 }
 
 export default function ScanWorkflow({
@@ -23,6 +24,7 @@ export default function ScanWorkflow({
   initialPresetId,
   initialDocumentName,
   modelName = 'Kraken BVision OCR',
+  focusDocumentView = false,
 }: ScanWorkflowProps) {
   const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(PRESET_DOCUMENTS[0]);
   const [editedLines, setEditedLines] = useState<string[]>(() => PRESET_DOCUMENTS[0].lines.map((line) => line.textLatinica));
@@ -31,12 +33,23 @@ export default function ScanWorkflow({
   const [showResult, setShowResult] = useState(true);
   const [activeLine, setActiveLine] = useState<number | null>(null);
   const [customDocuments, setCustomDocuments] = useState<Array<{ name: string; url: string; doc: PresetDocument }>>([]);
+  const [researcherReviewed, setResearcherReviewed] = useState(false);
+  const [processedAt] = useState(() =>
+    new Intl.DateTimeFormat('bs-BA', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date())
+  );
 
   const handleSelectPreset = (doc: PresetDocument) => {
     if (isScanning) return;
     setSelectedDoc(doc);
     setShowResult(true);
     setActiveLine(null);
+    setResearcherReviewed(false);
   };
 
   const makeCustomDocument = (file: File, index: number) => {
@@ -88,6 +101,7 @@ export default function ScanWorkflow({
       setSelectedDoc(documents[0].doc);
       setShowResult(false);
       setActiveLine(null);
+      setResearcherReviewed(false);
   };
 
   useEffect(() => {
@@ -102,9 +116,27 @@ export default function ScanWorkflow({
 
   useEffect(() => {
     setEditedLines(selectedDoc.lines.map((line) => line.textLatinica));
+    setResearcherReviewed(false);
   }, [selectedDoc]);
 
   const customFile = customDocuments.find((item) => item.doc.id === selectedDoc.id) ?? null;
+  const segmentationComplete = showResult || scanProgress >= 45;
+  const transliterationComplete = showResult;
+  const completedStatusCount = [segmentationComplete, transliterationComplete, researcherReviewed].filter(Boolean).length;
+  const statusItems = [
+    {
+      label: segmentationComplete ? 'Segmentacija gotova' : isScanning ? 'Segmentacija u toku' : 'Čeka segmentaciju',
+      complete: segmentationComplete,
+    },
+    {
+      label: transliterationComplete ? 'Transliteracija gotova' : isScanning ? 'Transliteracija u toku' : 'Čeka transliteraciju',
+      complete: transliterationComplete,
+    },
+    {
+      label: researcherReviewed ? 'Kontrola istraživača gotova' : 'Kontrola istraživača čeka',
+      complete: researcherReviewed,
+    },
+  ];
 
   const handleStartScan = () => {
     if (isScanning) return;
@@ -161,10 +193,53 @@ export default function ScanWorkflow({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <div className={`scan-workflow ${focusDocumentView ? 'scan-workflow--focused' : ''}`}>
+      <section className="document-meta-panel">
+        <div className="document-meta-panel__main">
+          <span>Aktivni dokument</span>
+          <h2>{selectedDoc.title}</h2>
+          <p><MapPin size={13} /> {selectedDoc.origin} · {selectedDoc.year}</p>
+        </div>
+
+        <div className="document-meta-panel__status">
+          <div className="document-meta-panel__progress">
+            <span>Napredak obrade</span>
+            <strong>{completedStatusCount}/3</strong>
+            <i style={{ width: `${(completedStatusCount / 3) * 100}%` }} />
+          </div>
+
+          <div className="document-status-list">
+            {statusItems.map((item) => (
+              <span key={item.label} className={item.complete ? 'is-complete' : ''}>
+                <CheckCircle2 size={13} />
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="document-meta-panel__facts">
+          <span><CalendarClock size={14} /> Obrađeno: {showResult ? processedAt : 'nije pokrenuto'}</span>
+          <span><BadgeCheck size={14} /> Model: {modelName}</span>
+          <span><FileText size={14} /> Segmenti: {selectedDoc.lines.length}</span>
+        </div>
+
+        <Button
+          type="button"
+          disabled={!showResult || isScanning}
+          onClick={() => setResearcherReviewed(true)}
+          className={`document-review-button ${researcherReviewed ? 'is-complete' : ''}`}
+        >
+          <ShieldCheck size={15} />
+          {researcherReviewed ? 'Kontrola potvrđena' : 'Označi kontrolu'}
+        </Button>
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
       {/* LEFT COLUMN: Preset selector & upload & active file preview */}
       <div className="lg:col-span-5 flex flex-col gap-6">
         {/* PRESET PAPERS */}
+        {!focusDocumentView && (
         <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
           <legend className="text-xs font-serif font-bold text-[#C5A059] uppercase tracking-[0.2em] mb-4">
             Iskopine i Dokumenti
@@ -235,6 +310,7 @@ export default function ScanWorkflow({
             </div>
           )}
         </div>
+        )}
 
         {/* WORKSPACE PREVIEW FRAME */}
         <div className="relative flex flex-col p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm overflow-hidden flex-1 select-none">
@@ -334,36 +410,8 @@ export default function ScanWorkflow({
         </div>
       </div>
 
-      {/* RIGHT COLUMN: OCR Outputs / Decoders side by side & Scans Counter */}
+      {/* RIGHT COLUMN: OCR Outputs / Decoders side by side */}
       <div className="lg:col-span-7 flex flex-col gap-6">
-        {/* COUNTER & PERFORMANCE HUDS */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
-            <span className="text-stone-500 text-[10px] uppercase font-serif tracking-[0.15em] block mb-1">
-              Odrađeni skenovi
-            </span>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-mono font-bold text-stone-100">
-                {scansHistory.length}
-              </span>
-              <span className="text-emerald-500 text-xs font-semibold">Aktivan status</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
-            <span className="text-stone-500 text-[10px] uppercase font-serif tracking-[0.15em] block mb-1">
-              Prosjek Pouzdanosti
-            </span>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-mono font-bold text-[#C5A059]">
-                96.4%
-              </span>
-              <span className="text-stone-400 text-xs font-serif">AI model v1.4</span>
-            </div>
-          </div>
-
-        </div>
-
         {/* OCR RESULTS BOX */}
         <div className="flex-1 p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm flex flex-col min-h-[450px]">
           <div className="flex items-center justify-between mb-6 border-b border-[#2A2A2A] pb-4">
@@ -444,9 +492,12 @@ export default function ScanWorkflow({
                           </span>
                           <EditableLatinText
                             value={editedLines[idx] ?? line.textLatinica}
-                            onChange={(value) => setEditedLines((current) =>
-                              current.map((item, lineIndex) => lineIndex === idx ? value : item)
-                            )}
+                            onChange={(value) => {
+                              setResearcherReviewed(false);
+                              setEditedLines((current) =>
+                                current.map((item, lineIndex) => lineIndex === idx ? value : item)
+                              );
+                            }}
                           />
                         </div>
                       </div>
@@ -513,6 +564,7 @@ export default function ScanWorkflow({
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }

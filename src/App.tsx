@@ -1,4 +1,4 @@
-import { DragEvent, useEffect, useRef, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Archive,
@@ -14,7 +14,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  ScanLine,
   Settings,
   ShieldCheck,
   UserRound,
@@ -72,8 +71,17 @@ const HOME_GREETINGS = [
   'Koju povelju danas vraćamo u život?',
 ];
 
+const LOGIN_CREDENTIALS = {
+  username: 'qla.dev',
+  password: 'Qla.dev2026!',
+};
+
 export default function App() {
   const gpuInfo = useGpuInfo();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
   const [greetingIndex, setGreetingIndex] = useState(() => Math.floor(Math.random() * HOME_GREETINGS.length));
   const [workspace, setWorkspace] = useState<Workspace>('home');
   const [selectedModel, setSelectedModel] = useState(modelOptions[0].id);
@@ -81,6 +89,7 @@ export default function App() {
   const [documentName, setDocumentName] = useState('');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [documentSelectionNonce, setDocumentSelectionNonce] = useState(0);
+  const [documentFocusMode, setDocumentFocusMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -138,6 +147,7 @@ export default function App() {
     setPendingUploads([]);
     setDocumentName('');
     setSelectedPresetId(null);
+    setDocumentFocusMode(false);
     setGreetingIndex((current) => (current + 1) % HOME_GREETINGS.length);
     navigate('home');
   };
@@ -152,6 +162,7 @@ export default function App() {
     const item: RecentDocument = { id: `upload-${Date.now()}`, title, files: supportedFiles };
     setPendingUploads(supportedFiles);
     setSelectedPresetId(null);
+    setDocumentFocusMode(false);
     setDocumentSelectionNonce((value) => value + 1);
     setRecentDocuments((current) => [item, ...current].slice(0, 7));
     navigate('scanner');
@@ -161,6 +172,7 @@ export default function App() {
     setDocumentName(document.title);
     setPendingUploads([...(document.files ?? [])]);
     setSelectedPresetId(document.presetId ?? null);
+    setDocumentFocusMode(true);
     setDocumentSelectionNonce((value) => value + 1);
     navigate('scanner');
   };
@@ -172,9 +184,97 @@ export default function App() {
   };
 
   const activeModel = modelOptions.find((option) => option.id === selectedModel) ?? modelOptions[0];
+  const averageAccuracy = scansHistory.length
+    ? scansHistory.reduce((sum, scan) => sum + scan.accuracy, 0) / scansHistory.length
+    : 0;
+
+  const handleLoginSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (
+      loginUsername.trim() === LOGIN_CREDENTIALS.username
+      && loginPassword === LOGIN_CREDENTIALS.password
+    ) {
+      setIsAuthenticated(true);
+      setLoginError('');
+      setLoginPassword('');
+      return;
+    }
+
+    setLoginError('Pogrešno korisničko ime ili lozinka.');
+  };
 
   return (
     <div className={`app-shell ${workspace === 'home' ? 'app-shell--home' : ''}`}>
+      <AnimatePresence>
+        {!isAuthenticated && (
+          <motion.div
+            className="login-gate"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="login-title"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.form
+              className="login-card"
+              onSubmit={handleLoginSubmit}
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ duration: 0.22 }}
+            >
+              <span className="login-card__seal">Б</span>
+              <h1 id="login-title">Prijava u Bosančica AI</h1>
+              <p>
+                Pristup je otvoren za qla.dev istraživački prostor. Unesite dodijeljene podatke za
+                obradu i pregled dokumenata.
+              </p>
+
+              <div className="login-card__fields">
+                <label>
+                  <span>Korisničko ime</span>
+                  <input
+                    value={loginUsername}
+                    onChange={(event) => {
+                      setLoginUsername(event.target.value);
+                      setLoginError('');
+                    }}
+                    autoComplete="username"
+                    placeholder="qla.dev"
+                    aria-label="Korisničko ime"
+                  />
+                </label>
+                <label>
+                  <span>Lozinka</span>
+                  <input
+                    type="password"
+                    value={loginPassword}
+                    onChange={(event) => {
+                      setLoginPassword(event.target.value);
+                      setLoginError('');
+                    }}
+                    autoComplete="current-password"
+                    placeholder="Unesite lozinku"
+                    aria-label="Lozinka"
+                  />
+                </label>
+              </div>
+
+              {loginError && <span className="login-card__error">{loginError}</span>}
+
+              <Button type="submit" className="login-card__submit">
+                Nastavi
+              </Button>
+              <small>
+                Dokumenti ostaju u lokalnom radnom toku, a pristup je zaključan dok prijava ne prođe.
+              </small>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {mobileSidebarOpen && (
           <motion.button
@@ -211,10 +311,6 @@ export default function App() {
         </Button>
 
         <nav className="sidebar__nav" aria-label="Glavna navigacija">
-          <Button className={workspace === 'scanner' ? 'is-active' : ''} onClick={() => navigate('scanner')}>
-            <ScanLine size={19} />
-            {!sidebarCollapsed && <span>Transliteracija</span>}
-          </Button>
           <Button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
             <Archive size={19} />
             {!sidebarCollapsed && <span>Arhiv slova</span>}
@@ -406,7 +502,6 @@ export default function App() {
                     maxLength={80}
                     aria-label="Ime dokumenta"
                     className="home-composer__input"
-                    autoFocus
                   />
 
                   <div className="mode-picker home-composer__model" ref={modeMenuRef}>
@@ -496,6 +591,18 @@ export default function App() {
                           <ChevronDown size={14} />
                         </Button>
                       </div>
+                      <div className="transcription-modelbar__stats" aria-label="Statistika obrade">
+                        <div className="transcription-modelbar__stat">
+                          <small>Odrađeni skenovi</small>
+                          <strong>{scansHistory.length}</strong>
+                          <span>Aktivan status</span>
+                        </div>
+                        <div className="transcription-modelbar__stat">
+                          <small>Prosjek pouzdanosti</small>
+                          <strong>{averageAccuracy.toFixed(1)}%</strong>
+                          <span>AI model v1.4</span>
+                        </div>
+                      </div>
                     </div>
                     <ScanWorkflow
                       key={`scanner-${documentSelectionNonce}`}
@@ -505,6 +612,7 @@ export default function App() {
                       initialPresetId={selectedPresetId}
                       initialDocumentName={documentName.trim()}
                       modelName={activeModel.label}
+                      focusDocumentView={documentFocusMode}
                     />
                   </>
                 )}
