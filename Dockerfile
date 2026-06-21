@@ -10,14 +10,21 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine AS runtime
+FROM node:22-alpine AS runtime
 
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=8000
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+COPY server.js ./server.js
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD wget -qO- http://127.0.0.1:8000/ >/dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:8000/api/system/gpu >/dev/null || wget -qO- http://127.0.0.1:8000/ >/dev/null || exit 1
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.js"]

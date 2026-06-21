@@ -196,7 +196,7 @@ button { color: inherit; }
 .welcome__note { margin: 19px 0 0; color: #5f5c57; font-size: 9px; text-align: center; }
 
 .upload-home { width: min(100%, 760px); height: 100%; min-height: 0; margin: 0 auto; padding: 0; display: flex; flex-direction: column; justify-content: center; }
-.home-greeting { margin: 0 0 28px; color: #e8e5de; font: 500 clamp(24px, 3vw, 38px)/1.2 "DM Sans", sans-serif; letter-spacing: -.035em; text-align: center; text-wrap: balance; }
+.home-greeting { margin: 0 0 28px; color: #e8e5de; font: 500 clamp(15px, 2.2vw, 30px)/1.2 "DM Sans", sans-serif; letter-spacing: -.035em; text-align: center; white-space: nowrap; }
 .upload-home__heading { margin-bottom: 25px; text-align: center; }
 .upload-home__heading > span { color: #a9874c; font: 700 9px/1.4 "JetBrains Mono", monospace; letter-spacing: .2em; }
 .upload-home__heading h1 { margin: 10px 0 9px; color: #f1eee6; font: 700 clamp(30px, 4vw, 42px)/1.15 "Cinzel", serif; letter-spacing: -.03em; }
@@ -324,7 +324,7 @@ button { color: inherit; }
   .workspace-heading__new { width: 37px; padding: 0; justify-content: center; }
   .workspace-heading__new { font-size: 0; }
   .upload-home { padding-top: 0; }
-  .home-greeting { margin-bottom: 20px; font-size: 25px; }
+  .home-greeting { margin-bottom: 20px; font-size: clamp(11px, 3.4vw, 20px); }
   .upload-home__heading h1 { font-size: 29px; }
   .upload-panel { padding: 9px; border-radius: 17px; }
   .upload-dropzone { min-height: 270px; }
@@ -342,7 +342,7 @@ button { color: inherit; }
   .home-model-trigger { width: 118px; height: 46px; padding-inline: 11px; }
   .home-model-trigger span { font-size: 9px; }
   .home-composer__upload { width: 40px; height: 40px; flex-basis: 40px; }
-  .home-composer__model .model-menu { width: min(310px, calc(100vw - 36px)); right: -44px; }
+  .home-composer__model .model-menu { width: auto; max-height: calc(50vh - 24px); position: fixed; inset: calc(50% + 48px) 12px auto; overflow-y: auto; }
   .upload-source-menu { width: min(310px, calc(100vw - 36px)); left: -7px; }
   .gpu-card__meter { display: none; }
   .gpu-card__state span { display: none; }

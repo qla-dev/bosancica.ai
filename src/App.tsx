@@ -58,12 +58,18 @@ const modelOptions: Array<{
 ];
 
 const HOME_GREETINGS = [
-  'Zdravo, istraživaču. Na kojem dokumentu radimo danas?',
+  'Zdravo, istraživaču. Koji dokument danas čitamo?',
   'Koji trag prošlosti danas čitamo?',
   'Spremni za novu transliteraciju?',
-  'Donesite dokument. Otkrijmo šta u njemu piše.',
-  'Koju ćemo stranicu historije danas otvoriti?',
+  'Spustite dokument. Otkrijmo šta u njemu piše.',
+  'Koju stranicu historije danas otvaramo?',
   'Novi dokument, nova priča. Počnimo.',
+  'Šta nam prošlost danas želi reći?',
+  'Odaberite dokument i krenimo.',
+  'Koji rukopis danas oživljavamo?',
+  'Vrijeme je za još jedno otkriće.',
+  'Spustite trag. Mi ćemo pročitati znakove.',
+  'Koju povelju danas vraćamo u život?',
 ];
 
 export default function App() {

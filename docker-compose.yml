@@ -11,6 +11,7 @@ services:
     container_name: bosancica-frontend
     ports:
       - "8000:8000"
+    gpus: all
     env_file:
       - .env
     networks:
