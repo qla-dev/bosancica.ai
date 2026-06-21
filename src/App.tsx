@@ -29,6 +29,7 @@ import LetterArchive from './components/LetterArchive';
 import TrainerDashboard from './components/TrainerDashboard';
 import Button from './components/ui/Button';
 import IconButton from './components/ui/IconButton';
+import useGpuInfo from './hooks/useGpuInfo';
 
 type Workspace = 'home' | 'scanner' | 'archive' | 'trainer';
 type RecentDocument = {
@@ -40,7 +41,7 @@ type RecentDocument = {
 
 const workspaceMeta: Record<Workspace, { label: string; eyebrow: string }> = {
   home: { label: 'Novi dokument', eyebrow: 'Bosančica AI' },
-  scanner: { label: 'Skeniranje i transkripcija', eyebrow: 'OCR laboratorija' },
+  scanner: { label: 'Skeniranje i transliteracija', eyebrow: 'OCR laboratorija' },
   archive: { label: 'Arhiv slova', eyebrow: 'Digitalna zbirka' },
   trainer: { label: 'AI trener', eyebrow: 'Nadzor modela' },
 };
@@ -60,6 +61,7 @@ const modelOptions: Array<{
 ];
 
 export default function App() {
+  const gpuInfo = useGpuInfo();
   const [workspace, setWorkspace] = useState<Workspace>('home');
   const [selectedModel, setSelectedModel] = useState(modelOptions[0].id);
   const [pendingUploads, setPendingUploads] = useState<File[]>([]);
@@ -192,7 +194,7 @@ export default function App() {
         <nav className="sidebar__nav" aria-label="Glavna navigacija">
           <Button className={workspace === 'scanner' ? 'is-active' : ''} onClick={() => navigate('scanner')}>
             <ScanLine size={19} />
-            {!sidebarCollapsed && <span>Transkripcija</span>}
+            {!sidebarCollapsed && <span>Transliteracija</span>}
           </Button>
           <Button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
             <Archive size={19} />
@@ -362,13 +364,15 @@ export default function App() {
                   <div className="gpu-card">
                     <span className="gpu-card__server"><Server size={18} /></span>
                     <div className="gpu-card__identity">
-                      <span><i /> qla.dev local server</span>
-                      <strong>AMD Radeon 610M</strong>
+                      <span><i /> GPU ovog uređaja</span>
+                      <strong>{gpuInfo.name}</strong>
                     </div>
                     <div className="gpu-card__meter" aria-label="Grafička aktivna">
                       <span /><span /><span /><span /><span />
                     </div>
-                    <div className="gpu-card__state"><Gauge size={14} /><span>GPU spremna</span></div>
+                    <div className={`gpu-card__state gpu-card__state--${gpuInfo.status}`}>
+                      <Gauge size={14} /><span>{gpuInfo.statusLabel}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -410,13 +414,13 @@ export default function App() {
                           onClick={() => setModeMenuOpen((value) => !value)}
                         >
                           <span><Bot size={17} /></span>
-                          <div><small>Model transkripcije</small><strong>{activeModel.label}</strong></div>
+                          <div><small>Model transliteracije</small><strong>{activeModel.label}</strong></div>
                           <ChevronDown size={14} />
                         </Button>
                       </div>
                       <div className="transcription-modelbar__gpu">
                         <i />
-                        <div><small>qla.dev local server</small><strong>AMD Radeon 610M</strong></div>
+                        <div><small>GPU ovog uređaja</small><strong>{gpuInfo.name}</strong></div>
                         <div className="mini-meter"><span /><span /><span /><span /></div>
                       </div>
                     </div>

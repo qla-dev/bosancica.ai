@@ -101,7 +101,7 @@ export default function EditableLatinText({ value, onChange }: EditableLatinText
         rows={3}
         spellCheck
         className="latin-editor"
-        aria-label="Uredi latiničnu transkripciju"
+        aria-label="Uredi latiničnu transliteraciju"
         title="Označite slovo i kliknite desnim klikom za slične znakove"
       />
 

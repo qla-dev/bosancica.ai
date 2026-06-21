@@ -309,7 +309,7 @@ export default function ScanWorkflow({
                 <>
                   <Cpu className="w-4.5 h-4.5 text-white" />
                   <span>
-                    Pokreni AI Transkripciju{customDocuments.length > 1 ? ` (${customDocuments.length} slika)` : ''}
+                    Pokreni AI transliteraciju{customDocuments.length > 1 ? ` (${customDocuments.length} slika)` : ''}
                   </span>
                 </>
               )}
@@ -353,7 +353,7 @@ export default function ScanWorkflow({
           <div className="flex items-center justify-between mb-6 border-b border-[#2A2A2A] pb-4">
             <div>
               <h3 className="text-lg font-serif font-semibold text-stone-100">
-                AI Rezultat i Transkripcija
+                AI rezultat i transliteracija
               </h3>
               <p className="text-xs text-stone-405 mt-0.5">
                 Drevne ligature izdvojene modelom {modelName}
@@ -388,7 +388,7 @@ export default function ScanWorkflow({
               {/* LINE BY LINE BREAKDOWN */}
               <div className="flex flex-col gap-4">
                 <legend className="text-xs font-serif uppercase tracking-[0.2em] text-[#C5A059]">
-                  Transkripcija po segmentima reda
+                  Transliteracija po segmentima reda
                 </legend>
 
                 <div className="flex flex-col gap-3">

@@ -94,7 +94,8 @@ button { color: inherit; }
 .brand__mark {
   width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center;
   border-radius: 10px; color: #171512; background: #c9a45f; border: 1px solid #e2c47e;
-  font: 900 17px/1 "Cinzel", serif; box-shadow: 0 6px 24px rgba(197, 160, 89, .13);
+  font-family: "BoSanko2", serif; font-size: 27px; font-weight: 400; line-height: 1;
+  box-shadow: 0 6px 24px rgba(197, 160, 89, .13);
 }
 .brand__copy { min-width: 0; display: flex; flex-direction: column; }
 .brand__copy strong { color: #f5f1e8; font: 700 14px/1.2 "Cinzel", serif; letter-spacing: .025em; }
@@ -230,6 +231,8 @@ button { color: inherit; }
 .gpu-card__meter span { width: 4px; border-radius: 2px; background: #628f6b; animation: gpuPulse 1.35s ease-in-out infinite alternate; }
 .gpu-card__meter span:nth-child(1) { height: 35%; }.gpu-card__meter span:nth-child(2) { height: 70%; animation-delay: -.4s; }.gpu-card__meter span:nth-child(3) { height: 48%; animation-delay: -.8s; }.gpu-card__meter span:nth-child(4) { height: 88%; animation-delay: -.2s; }.gpu-card__meter span:nth-child(5) { height: 58%; animation-delay: -.65s; }
 .gpu-card__state { padding-left: 12px; display: flex; align-items: center; gap: 6px; border-left: 1px solid #30352f; color: #76a97f; font-size: 9px; font-weight: 600; }
+.gpu-card__state--masked, .gpu-card__state--software { color: #c49a55; }
+.gpu-card__state--unavailable { color: #b56f6f; }
 @keyframes gpuPulse { to { height: 24%; opacity: .45; } }
 
 .transcription-modelbar { width: 100%; margin-bottom: 18px; padding: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #34332f; border-radius: 14px; background: #151514; }
