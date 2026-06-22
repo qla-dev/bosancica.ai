@@ -37,6 +37,11 @@ Open http://localhost:8000.
 
 Or run it with Docker Compose from the repository root:
 
+Compose publishes only `PUBLIC_HTTP_PORT` on the host, defaulting to `8000`.
+Backend, Kraken 1, and Kraken 2 stay private on the Docker network. The frontend
+serves the app and proxies browser calls from `/api/*` to `BACKEND_API_URL`,
+which should be `http://bosancica-backend:8001` when running in Compose.
+
 Postgres is not started by Docker Compose. It must already be running directly on
 the server/host and must expose a database Laravel can use. The default Compose
 values expect:
@@ -60,6 +65,16 @@ Override the database connection for another server by setting
 `BACKEND_DB_HOST`, `BACKEND_DB_DATABASE`, `BACKEND_DB_USERNAME`, and
 `BACKEND_DB_PASSWORD` in the root `.env` file or in the shell before running
 Compose.
+
+The root `.env` also controls internal Docker service URLs:
+
+```text
+BACKEND_API_URL=http://bosancica-backend:8001
+KRAKEN_SERVICE_URL=http://bosancica-kraken:8002
+KRAKEN_2_SERVICE_URL=http://bosancica-kraken-2:8003
+```
+
+For local non-Docker development, use the `127.0.0.1` equivalents.
 
 On a Linux server, make sure Postgres accepts connections from the Docker bridge
 network. That usually means `listen_addresses` cannot be limited only to

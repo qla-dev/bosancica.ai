@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   BookOpen,
@@ -20,11 +20,12 @@ import {
   Upload,
   UserRound,
 } from 'lucide-react';
-import { MOCK_HISTORY, PRESET_DOCUMENTS } from './data';
+import { MOCK_HISTORY } from './data';
 import { ScanItem } from './types';
 import ScanWorkflow, { type ScanProcessStatus, type ScanWorkflowHandle } from './components/ScanWorkflow';
 import LetterArchive from './components/LetterArchive';
 import TrainerDashboard from './components/TrainerDashboard';
+import { listSegmentJobs, type SegmentJob } from './api/ocrJobs';
 import Button from './components/ui/Button';
 import IconButton from './components/ui/IconButton';
 import PrimaryButton from './components/ui/PrimaryButton';
@@ -36,6 +37,7 @@ type RecentDocument = {
   title: string;
   presetId?: string;
   files?: File[];
+  segmentJob?: SegmentJob;
 };
 
 const workspaceMeta: Record<Workspace, { label: string; eyebrow: string }> = {
@@ -54,8 +56,14 @@ const modelOptions: Array<{
   {
     id: 'kraken-bvision-local',
     label: 'Kraken BVision OCR',
-    description: 'qla.dev local server',
+    description: 'qla.dev local server · :8002',
     badge: 'Lokalno',
+  },
+  {
+    id: 'kraken-2-local',
+    label: 'Kraken 2',
+    description: 'Docker segmenter · :8003',
+    badge: 'Novo',
   },
 ];
 
@@ -106,6 +114,40 @@ const readAuthSessionExpiration = () => {
   }
 };
 
+const recentDocumentFromSegmentJob = (job: SegmentJob): RecentDocument => ({
+  id: `segment-${job.id}`,
+  title: job.document_name || job.original_filename || `Dokument #${job.id}`,
+  segmentJob: job,
+});
+
+const processStatusFromSegmentJob = (job: SegmentJob): ScanProcessStatus => {
+  if (job.status === 'segmented') {
+    return {
+      stage: 'segmented',
+      progress: 100,
+      segmentationModel: job.model_name ?? undefined,
+    };
+  }
+
+  if (job.status === 'failed') {
+    return {
+      stage: 'failed',
+      progress: 0,
+      segmentationModel: job.model_name ?? undefined,
+    };
+  }
+
+  if (job.status === 'pending' || job.status === 'running') {
+    return {
+      stage: 'segmenting',
+      progress: job.status === 'running' ? 60 : 25,
+      segmentationModel: job.model_name ?? undefined,
+    };
+  }
+
+  return { stage: 'idle', progress: 0, segmentationModel: job.model_name ?? undefined };
+};
+
 export default function App() {
   const gpuInfo = useGpuInfo();
   const [authSessionExpiresAt, setAuthSessionExpiresAt] = useState<number | null>(readAuthSessionExpiration);
@@ -131,13 +173,8 @@ export default function App() {
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
-  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>(
-    PRESET_DOCUMENTS.map((document) => ({
-      id: document.id,
-      title: document.title,
-      presetId: document.id,
-    })),
-  );
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
+  const [selectedSegmentJob, setSelectedSegmentJob] = useState<SegmentJob | null>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const singleImageInputRef = useRef<HTMLInputElement>(null);
@@ -165,6 +202,34 @@ export default function App() {
 
     return () => window.clearTimeout(expirationTimer);
   }, [authSessionExpiresAt]);
+
+  const refreshSegmentHistory = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const jobs = await listSegmentJobs(signal);
+      const persistedDocuments = jobs.map(recentDocumentFromSegmentJob);
+
+      setRecentDocuments((current) => {
+        const persistedTitles = new Set(persistedDocuments.map((document) => document.title));
+        const activeUploads = current.filter((document) => (
+          document.files?.length
+          && !document.segmentJob
+          && !persistedTitles.has(document.title)
+        ));
+        return [...activeUploads, ...persistedDocuments].slice(0, 20);
+      });
+    } catch {
+      // The scanner still works if history cannot be refreshed.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const controller = new AbortController();
+    void refreshSegmentHistory(controller.signal);
+
+    return () => controller.abort();
+  }, [isAuthenticated, refreshSegmentHistory]);
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
@@ -200,6 +265,7 @@ export default function App() {
     setPendingUploads([]);
     setDocumentName('');
     setSelectedPresetId(null);
+    setSelectedSegmentJob(null);
     setDocumentFocusMode(false);
     setResearcherReviewed(false);
     setReviewAvailable(true);
@@ -218,6 +284,7 @@ export default function App() {
     const item: RecentDocument = { id: `upload-${Date.now()}`, title, files: supportedFiles };
     setPendingUploads(supportedFiles);
     setSelectedPresetId(null);
+    setSelectedSegmentJob(null);
     setDocumentFocusMode(false);
     setResearcherReviewed(false);
     setReviewAvailable(false);
@@ -285,15 +352,23 @@ export default function App() {
   }, [documentName, isAuthenticated, workspace]);
 
   const openRecentDocument = (document: RecentDocument) => {
+    const nextModelId = document.segmentJob?.model_id;
+    if (nextModelId && modelOptions.some((option) => option.id === nextModelId)) {
+      setSelectedModel(nextModelId);
+    }
+
     setDocumentName(document.title);
     setPendingUploads([...(document.files ?? [])]);
     setSelectedPresetId(document.presetId ?? null);
+    setSelectedSegmentJob(document.segmentJob ?? null);
     setDocumentFocusMode(true);
     setResearcherReviewed(false);
-    setReviewAvailable(!document.files?.length);
-    setScanProcessStatus(document.files?.length
-      ? { stage: 'idle', progress: 0 }
-      : { stage: 'complete', progress: 100 });
+    setReviewAvailable(!document.files?.length && !document.segmentJob);
+    setScanProcessStatus(document.segmentJob
+      ? processStatusFromSegmentJob(document.segmentJob)
+      : document.files?.length
+        ? { stage: 'idle', progress: 0 }
+        : { stage: 'complete', progress: 100 });
     setDocumentSelectionNonce((value) => value + 1);
     navigate('scanner');
   };
@@ -721,11 +796,24 @@ export default function App() {
                               exit={{ opacity: 0, y: -6, scale: .98 }}
                             >
                               <span className="mode-menu__label">Dostupni lokalni modeli</span>
-                              <Button type="button" className="is-selected" onClick={() => setModeMenuOpen(false)}>
-                                <span className="mode-menu__icon"><Bot size={18} /></span>
-                                <span><strong>{activeModel.label}<em>Lokalno</em></strong><small>{activeModel.description}</small></span>
-                                <Check size={16} />
-                              </Button>
+                              {modelOptions.map((option) => (
+                                <Button
+                                  type="button"
+                                  key={option.id}
+                                  className={selectedModel === option.id ? 'is-selected' : ''}
+                                  onClick={() => {
+                                    setSelectedModel(option.id);
+                                    setModeMenuOpen(false);
+                                  }}
+                                >
+                                  <span className="mode-menu__icon"><Bot size={18} /></span>
+                                  <span>
+                                    <strong>{option.label}{option.badge && <em>{option.badge}</em>}</strong>
+                                    <small>{option.description}</small>
+                                  </span>
+                                  {selectedModel === option.id && <Check size={16} />}
+                                </Button>
+                              ))}
                               <div className="transcription-model-menu__stats" aria-label="Statistika obrade">
                                 <div>
                                   <small>Odrađeni skenovi</small>
@@ -810,13 +898,16 @@ export default function App() {
                       onScanCompleted={(newScan) => setScansHistory((current) => [newScan, ...current])}
                       initialFiles={pendingUploads}
                       initialPresetId={selectedPresetId}
+                      initialSegmentJob={selectedSegmentJob}
                       initialDocumentName={documentName.trim()}
+                      modelId={activeModel.id}
                       modelName={activeModel.label}
                       focusDocumentView={documentFocusMode}
                       researcherReviewed={researcherReviewed}
                       onResearcherReviewedChange={setResearcherReviewed}
                       onReviewAvailabilityChange={setReviewAvailable}
                       onProcessStatusChange={setScanProcessStatus}
+                      onSegmentHistoryChange={refreshSegmentHistory}
                     />
                   </>
                 )}

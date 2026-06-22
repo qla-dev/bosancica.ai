@@ -49,6 +49,10 @@ export interface SegmentJob {
   id: number;
   document_name?: string | null;
   original_filename?: string | null;
+  mime_type?: string | null;
+  model_id?: string | null;
+  model_name?: string | null;
+  service_url?: string | null;
   status: SegmentJobStatus;
   output_lines?: SegmentLine[] | null;
   output_metadata?: {
@@ -68,6 +72,10 @@ interface SegmentJobResponse {
   data: SegmentJob;
 }
 
+interface SegmentJobsResponse {
+  data: SegmentJob[];
+}
+
 interface CreateOcrJobOptions {
   file: File;
   documentName?: string;
@@ -75,7 +83,9 @@ interface CreateOcrJobOptions {
   signal?: AbortSignal;
 }
 
-type CreateSegmentJobOptions = Omit<CreateOcrJobOptions, 'modelName'>;
+type CreateSegmentJobOptions = CreateOcrJobOptions & {
+  modelId?: string;
+};
 
 const apiHeaders = {
   Accept: 'application/json',
@@ -143,11 +153,15 @@ export const createOcrJob = async ({
 export const createSegmentJob = async ({
   file,
   documentName,
+  modelId,
+  modelName,
   signal,
 }: CreateSegmentJobOptions) => {
   const body = new FormData();
   body.append('document', file);
   if (documentName?.trim()) body.append('document_name', documentName.trim());
+  if (modelId?.trim()) body.append('model_id', modelId.trim());
+  if (modelName?.trim()) body.append('model_name', modelName.trim());
 
   const payload = await requestJson<SegmentJobResponse>('/api/ocr/segments', {
     method: 'POST',
@@ -155,6 +169,11 @@ export const createSegmentJob = async ({
     signal,
   });
 
+  return payload.data;
+};
+
+export const listSegmentJobs = async (signal?: AbortSignal) => {
+  const payload = await requestJson<SegmentJobsResponse>('/api/ocr/segments', { signal });
   return payload.data;
 };
 
@@ -173,6 +192,8 @@ export const getSegmentJob = async (jobId: number, signal?: AbortSignal) => {
   const payload = await requestJson<SegmentJobResponse>(`/api/ocr/segments/${jobId}`, { signal });
   return payload.data;
 };
+
+export const getSegmentJobDocumentUrl = (jobId: number) => `/api/ocr/segments/${jobId}/document`;
 
 export const isSegmentJobTerminal = (job: SegmentJob) => (
   job.status === 'segmented'

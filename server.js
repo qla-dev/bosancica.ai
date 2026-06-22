@@ -10,6 +10,7 @@ const port = Number(process.env.PORT || 8000);
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(root, 'dist');
 const backendApiUrl = new URL(process.env.BACKEND_API_URL || 'http://127.0.0.1:8001');
+const backendOrigin = backendApiUrl.origin;
 
 const hopByHopHeaders = new Set([
   'connection',
@@ -65,6 +66,15 @@ app.get('/api/system/gpu', async (_request, response) => {
   return response.json(gpu);
 });
 
+app.get('/gateway/health', (_request, response) => {
+  response.set('Cache-Control', 'no-store');
+  response.json({
+    service: 'bosancica-frontend-gateway',
+    ok: true,
+    backend_api_url: backendOrigin,
+  });
+});
+
 const proxyToBackend = (request, response) => {
   const target = new URL(request.originalUrl, backendApiUrl);
   const client = target.protocol === 'https:' ? https : http;
@@ -83,18 +93,19 @@ const proxyToBackend = (request, response) => {
     response.status(502).json({
       error: 'Backend API unavailable',
       detail: error.message,
+      upstream: backendOrigin,
     });
   });
 
   request.pipe(proxyRequest);
 };
 
-app.get('/api/health', proxyToBackend);
-app.use('/api/ocr', proxyToBackend);
+app.use('/api', proxyToBackend);
 
 app.use(express.static(dist, { maxAge: '1y', immutable: true, index: false }));
 app.get('*', (_request, response) => response.sendFile(path.join(dist, 'index.html')));
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`Bosančica.ai server listening on :${port}`);
+  console.log(`Proxying /api/* to ${backendOrigin}`);
 });

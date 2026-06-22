@@ -4,6 +4,7 @@ import {
   createSegmentJob,
   OcrJob,
   SegmentJob,
+  getSegmentJobDocumentUrl,
   waitForOcrJob,
   waitForSegmentJob,
 } from '../api/ocrJobs';
@@ -34,13 +35,16 @@ interface ScanWorkflowProps {
   onScanCompleted: (newScan: ScanItem) => void;
   initialFiles?: File[];
   initialPresetId?: string | null;
+  initialSegmentJob?: SegmentJob | null;
   initialDocumentName?: string;
+  modelId?: string;
   modelName?: string;
   focusDocumentView?: boolean;
   researcherReviewed: boolean;
   onResearcherReviewedChange: (reviewed: boolean) => void;
   onReviewAvailabilityChange: (available: boolean) => void;
   onProcessStatusChange: (status: ScanProcessStatus) => void;
+  onSegmentHistoryChange?: () => void;
 }
 
 type CustomDocument = {
@@ -105,7 +109,16 @@ const ocrLinesFromJob = (job: OcrJob) => {
     .filter(Boolean);
 };
 
-const documentFromSegmentJob = (item: CustomDocument, segment: SegmentJob): PresetDocument => {
+const pdfPreviewUrl = (title: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1300" viewBox="0 0 1000 1300">
+    <rect width="1000" height="1300" fill="#d6c49f"/>
+    <rect x="90" y="90" width="820" height="1120" rx="20" fill="#eee3ca" stroke="#8f7952" stroke-width="5"/>
+    <text x="500" y="590" text-anchor="middle" font-family="serif" font-size="150" fill="#6f5834">PDF</text>
+    <text x="500" y="690" text-anchor="middle" font-family="sans-serif" font-size="34" fill="#77684d">${title.replace(/[<>&]/g, '')}</text>
+  </svg>
+`)}`;
+
+const documentWithSegmentLines = (doc: PresetDocument, segment: SegmentJob): PresetDocument => {
   const segmentLines = Array.isArray(segment.output_lines) ? segment.output_lines : [];
   const safeLines = segmentLines.length ? segmentLines : [{ index: 1, top: 25, height: 18 }];
   const fallbackHeight = Math.max(8, Math.min(18, 72 / Math.max(safeLines.length, 1)));
@@ -113,7 +126,7 @@ const documentFromSegmentJob = (item: CustomDocument, segment: SegmentJob): Pres
   const summary = `Segmentirano ${safeLines.length} redova.`;
 
   return {
-    ...item.doc,
+    ...doc,
     previewFit: 'contain',
     rawBosančicaText: summary,
     latinText: summary,
@@ -127,6 +140,36 @@ const documentFromSegmentJob = (item: CustomDocument, segment: SegmentJob): Pres
       };
     }),
   };
+};
+
+const documentFromSegmentJob = (item: CustomDocument, segment: SegmentJob): PresetDocument => (
+  documentWithSegmentLines(item.doc, segment)
+);
+
+const documentFromStoredSegmentJob = (segment: SegmentJob): PresetDocument => {
+  const title = segment.document_name || segment.original_filename || `Dokument #${segment.id}`;
+  const isPdf = segment.mime_type === 'application/pdf' || (segment.original_filename ?? '').toLowerCase().endsWith('.pdf');
+  const imageUrl = isPdf ? pdfPreviewUrl(title) : getSegmentJobDocumentUrl(segment.id);
+
+  return documentWithSegmentLines({
+    id: `segment-job-${segment.id}`,
+    title,
+    year: 'Učitani dokument',
+    origin: segment.model_name ? `Backend arhiva · ${segment.model_name}` : 'Backend arhiva',
+    imageUrl,
+    previewFit: 'contain',
+    rawBosančicaText: '',
+    latinText: '',
+    lines: [{ textBosančica: '', textLatinica: '', top: 25, height: 18 }],
+  }, segment);
+};
+
+const stageFromSegmentJob = (segment: SegmentJob): ScanProcessStage => {
+  if (segment.status === 'segmented') return 'segmented';
+  if (segment.status === 'failed') return 'failed';
+  if (segment.status === 'pending' || segment.status === 'running') return 'segmenting';
+
+  return 'idle';
 };
 
 const documentFromOcrJob = (item: CustomDocument, job: OcrJob): PresetDocument => {
@@ -164,21 +207,27 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
   onScanCompleted,
   initialFiles = [],
   initialPresetId,
+  initialSegmentJob,
   initialDocumentName,
+  modelId,
   modelName = 'Kraken BVision OCR',
   focusDocumentView = false,
   researcherReviewed,
   onResearcherReviewedChange,
   onReviewAvailabilityChange,
   onProcessStatusChange,
+  onSegmentHistoryChange,
 }: ScanWorkflowProps, ref) {
-  const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(PRESET_DOCUMENTS[0]);
-  const [editedLines, setEditedLines] = useState<string[]>(() => PRESET_DOCUMENTS[0].lines.map((line) => line.textLatinica));
-  const [processStage, setProcessStage] = useState<ScanProcessStage>('complete');
+  const initialSelectedDocument = initialSegmentJob ? documentFromStoredSegmentJob(initialSegmentJob) : PRESET_DOCUMENTS[0];
+  const [selectedDoc, setSelectedDoc] = useState<PresetDocument>(initialSelectedDocument);
+  const [editedLines, setEditedLines] = useState<string[]>(() => initialSelectedDocument.lines.map((line) => line.textLatinica));
+  const [processStage, setProcessStage] = useState<ScanProcessStage>(() => (
+    initialSegmentJob ? stageFromSegmentJob(initialSegmentJob) : 'complete'
+  ));
   const [scanProgress, setScanProgress] = useState(0);
   const [completedModels, setCompletedModels] = useState({
-    segmentationModel: modelName,
-    transliterationModel: modelName,
+    segmentationModel: initialSegmentJob?.model_name ?? modelName,
+    transliterationModel: initialSegmentJob ? '' : modelName,
   });
   const [activeLine, setActiveLine] = useState<number | null>(null);
   const [editedLocation, setEditedLocation] = useState(PRESET_DOCUMENTS[0].origin);
@@ -269,6 +318,23 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
   useEffect(() => {
     if (initialFiles.length) loadCustomFiles(initialFiles);
   }, [initialFiles]);
+
+  useEffect(() => {
+    if (!initialSegmentJob) return;
+
+    const document = documentFromStoredSegmentJob(initialSegmentJob);
+    setCustomDocuments([]);
+    setSelectedDoc(document);
+    setProcessStage(stageFromSegmentJob(initialSegmentJob));
+    setScanProgress(initialSegmentJob.status === 'segmented' ? 100 : 0);
+    setCompletedModels({
+      segmentationModel: initialSegmentJob.model_name ?? modelName,
+      transliterationModel: '',
+    });
+    setApiErrorMessage(initialSegmentJob.error_message ?? null);
+    setActiveLine(null);
+    onResearcherReviewedChange(false);
+  }, [initialSegmentJob?.id]);
 
   useEffect(() => {
     if (!initialPresetId) return;
@@ -398,10 +464,13 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         const createdJob = await createSegmentJob({
           file: item.file,
           documentName: item.doc.title,
+          modelId,
+          modelName,
           signal: controller.signal,
         });
 
         updateCustomDocument(item.doc.id, (current) => ({ ...current, segmentJob: createdJob }));
+        onSegmentHistoryChange?.();
         updateQueuedProgress(createdJob.status, index, documents.length);
 
         const completedJob = await waitForSegmentJob(
@@ -437,9 +506,10 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         ?? processedDocuments[0]?.doc
         ?? current
       ));
-      setCompletedModels({ segmentationModel: 'Kraken segmenter', transliterationModel: '' });
+      setCompletedModels({ segmentationModel: modelName, transliterationModel: '' });
       setScanProgress(100);
       setProcessStage('segmented');
+      onSegmentHistoryChange?.();
     } catch (error) {
       if (controller.signal.aborted) return;
 
@@ -597,7 +667,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     });
   };
 
-  useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [processStage, selectedDoc, editedLines, customDocuments]);
+  useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [processStage, selectedDoc, editedLines, customDocuments, modelId, modelName]);
 
   const previewUsesContainedImage = selectedDoc.previewFit === 'contain';
   const renderSegmentLineOverlays = () => selectedDoc.lines.map((ln, idx) => (
