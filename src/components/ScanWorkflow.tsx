@@ -1,4 +1,5 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+﻿import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { createOcrJob, OcrJob, waitForOcrJob } from '../api/ocrJobs';
 import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
 import BosancicaHoverText from './BosancicaHoverText';
@@ -7,7 +8,7 @@ import { CalendarClock, FileText, CheckCircle2, MapPin, Pencil, RefreshCw, Layer
 import Button from './ui/Button';
 import PrimaryButton from './ui/PrimaryButton';
 
-export type ScanProcessStage = 'idle' | 'segmenting' | 'segmented' | 'transliterating' | 'complete';
+export type ScanProcessStage = 'idle' | 'segmenting' | 'segmented' | 'transliterating' | 'complete' | 'failed';
 
 export interface ScanProcessStatus {
   stage: ScanProcessStage;
@@ -35,6 +36,64 @@ interface ScanWorkflowProps {
   onProcessStatusChange: (status: ScanProcessStatus) => void;
 }
 
+type CustomDocument = {
+  name: string;
+  url: string;
+  file: File;
+  doc: PresetDocument;
+  job?: OcrJob | null;
+};
+
+const terminalFailureStatuses = new Set(['failed', 'model_missing']);
+
+const normalizeOcrLineText = (line: unknown) => {
+  if (typeof line === 'string') return line.trim();
+  if (line && typeof line === 'object' && 'text' in line) {
+    const text = (line as { text?: unknown }).text;
+    return typeof text === 'string' ? text.trim() : '';
+  }
+
+  return '';
+};
+
+const ocrLinesFromJob = (job: OcrJob) => {
+  const structuredLines = Array.isArray(job.output_lines)
+    ? job.output_lines.map(normalizeOcrLineText).filter(Boolean)
+    : [];
+
+  if (structuredLines.length) return structuredLines;
+
+  return (job.output_text ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+};
+
+const documentFromOcrJob = (item: CustomDocument, job: OcrJob): PresetDocument => {
+  const lineTexts = ocrLinesFromJob(job);
+  const fallbackText = job.output_text?.trim() || item.doc.latinText;
+  const safeLines = lineTexts.length ? lineTexts : [fallbackText].filter(Boolean);
+  const lineHeight = Math.max(9, Math.min(18, 72 / Math.max(safeLines.length, 1)));
+  const lineStep = 76 / Math.max(safeLines.length, 1);
+
+  return {
+    ...item.doc,
+    rawBosančicaText: fallbackText,
+    latinText: safeLines.join(' '),
+    lines: safeLines.map((text, index) => ({
+      textBosančica: text,
+      textLatinica: text,
+      top: 12 + (index * lineStep),
+      height: lineHeight,
+    })),
+  };
+};
+
+const scanHistoryDate = () => {
+  const now = new Date();
+  return `Danas, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+};
+
 const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function ScanWorkflow({
   onScanCompleted,
   initialFiles = [],
@@ -59,19 +118,23 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
   const [editedLocation, setEditedLocation] = useState(PRESET_DOCUMENTS[0].origin);
   const [locationDraft, setLocationDraft] = useState(PRESET_DOCUMENTS[0].origin);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
-  const [customDocuments, setCustomDocuments] = useState<Array<{ name: string; url: string; doc: PresetDocument }>>([]);
+  const [customDocuments, setCustomDocuments] = useState<CustomDocument[]>([]);
+  const [apiErrorMessage, setApiErrorMessage] = useState<string | null>(null);
   const [processedAt] = useState(() => {
     const date = new Date();
     return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
   });
   const processIntervalRef = useRef<number | null>(null);
   const processCompletionRef = useRef<number | null>(null);
+  const ocrAbortRef = useRef<AbortController | null>(null);
   const isProcessing = processStage === 'segmenting' || processStage === 'transliterating';
   const isScanning = isProcessing;
   const showResult = processStage === 'complete';
+  const hasProcessFailed = processStage === 'failed';
 
   const handleSelectPreset = (doc: PresetDocument) => {
     if (isProcessing) return;
+    setApiErrorMessage(null);
     setSelectedDoc(doc);
     setProcessStage('complete');
     setScanProgress(100);
@@ -94,29 +157,29 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       const fakeDoc: PresetDocument = {
         id: `custom-${file.lastModified}-${index}`,
         title: initialDocumentName
-          ? `${initialDocumentName}${initialFiles.length > 1 ? ` · ${index + 1}` : ''}`
+          ? `${initialDocumentName}${initialFiles.length > 1 ? ` Â· ${index + 1}` : ''}`
           : file.name.substring(0, 24) || 'Uvezeni dokument',
         year: 'Nepoznat period',
-        origin: 'Učitano sa lokalnog računara',
+        origin: 'UÄitano sa lokalnog raÄunara',
         imageUrl: fakeUrl,
-        rawBosančicaText: 'Ⱆ ⰉⰏⰅ ⰑⰪA Ⰹ ⰔⰉⰐA Ⰹ ⰔⰂⰅⰕⰑⰃA ⰄⰖⰘA.',
+        rawBosančicaText: 'â°– â°‰â°â°… â°‘â°ªA â°‰ â°”â°‰â°A â°‰ â°”â°‚â°…â°•â°‘â°ƒA â°„â°–â°˜A.',
         latinText: 'Automatski detektovan tekst u starom bosanskom pismu.',
         lines: [
           {
-            textBosančica: 'Ⱆ ⰉⰏⰅ ⰑⰪA Ⰹ ⰔⰉⰐA',
+            textBosančica: 'â°– â°‰â°â°… â°‘â°ªA â°‰ â°”â°‰â°A',
             textLatinica: 'U ime oca i sina i svetoga duha.',
             top: 30,
             height: 20
           },
           {
-            textBosančica: 'Ⱑ ⰁAⰐⰠ ⰁⰑⰔⰐⰠⰔⰍⰉ ⰍⰖ Jews',
-            textLatinica: 'Ja, ban bosanski, svedočim narodu.',
+            textBosančica: 'â°¡ â°Aâ°â°  â°â°‘â°”â°â° â°”â°â°‰ â°â°– Jews',
+            textLatinica: 'Ja, ban bosanski, svedoÄim narodu.',
             top: 60,
             height: 20
           }
         ]
       };
-      return { name: file.name, url: fakeUrl, doc: fakeDoc };
+      return { name: file.name, url: fakeUrl, file, doc: fakeDoc };
   };
 
   const loadCustomFiles = (files: File[]) => {
@@ -129,12 +192,9 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       setProcessStage('idle');
       setScanProgress(0);
       setCompletedModels({ segmentationModel: '', transliterationModel: '' });
+      setApiErrorMessage(null);
       setActiveLine(null);
       onResearcherReviewedChange(false);
-      runProcess('segmenting', () => {
-        setCompletedModels((current) => ({ ...current, segmentationModel: modelName }));
-        setProcessStage('segmented');
-      });
   };
 
   useEffect(() => {
@@ -160,13 +220,18 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     onProcessStatusChange({ stage: processStage, progress: scanProgress, ...completedModels });
   }, [completedModels, onProcessStatusChange, onReviewAvailabilityChange, processStage, scanProgress]);
 
-  const customFile = customDocuments.find((item) => item.doc.id === selectedDoc.id) ?? null;
   const segmentationComplete = ['segmented', 'transliterating', 'complete'].includes(processStage);
   const transliterationComplete = processStage === 'complete';
   const completedStatusCount = [segmentationComplete, transliterationComplete, researcherReviewed].filter(Boolean).length;
   const statusItems = [
     {
-      label: segmentationComplete ? 'Segmentacija gotova' : processStage === 'segmenting' ? 'Segmentacija u toku' : 'Čeka segmentaciju',
+      label: hasProcessFailed
+        ? 'Greska u obradi'
+        : segmentationComplete
+          ? 'Segmentacija gotova'
+          : processStage === 'segmenting'
+            ? 'Segmentacija u toku'
+            : 'Ceka segmentaciju',
       complete: segmentationComplete,
     },
     {
@@ -176,11 +241,11 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           ? 'Transliteracija u toku'
           : segmentationComplete
             ? 'Transliteracija spremna'
-            : 'Čeka transliteraciju',
+            : 'ÄŒeka transliteraciju',
       complete: transliterationComplete,
     },
     {
-      label: researcherReviewed ? 'Kontrola istraživača gotova' : 'Kontrola istraživača čeka',
+      label: researcherReviewed ? 'Kontrola istraÅ¾ivaÄa gotova' : 'Kontrola istraÅ¾ivaÄa Äeka',
       complete: researcherReviewed,
     },
   ];
@@ -192,10 +257,20 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     processCompletionRef.current = null;
   };
 
-  useEffect(() => clearProcessTimers, []);
+  const cancelOcrRequest = () => {
+    ocrAbortRef.current?.abort();
+    ocrAbortRef.current = null;
+  };
+
+  useEffect(() => () => {
+    clearProcessTimers();
+    cancelOcrRequest();
+  }, []);
 
   const runProcess = (stage: 'segmenting' | 'transliterating', onComplete: () => void) => {
     clearProcessTimers();
+    cancelOcrRequest();
+    setApiErrorMessage(null);
     setProcessStage(stage);
     setScanProgress(0);
     let progress = 0;
@@ -214,9 +289,106 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     }, 140);
   };
 
+  const updateCustomDocument = (docId: string, updater: (item: CustomDocument) => CustomDocument) => {
+    setCustomDocuments((current) => current.map((item) => (
+      item.doc.id === docId ? updater(item) : item
+    )));
+  };
+
+  const updatePollingProgress = (job: OcrJob, documentIndex: number, totalDocuments: number) => {
+    const documentShare = 90 / Math.max(totalDocuments, 1);
+    const documentBase = documentIndex * documentShare;
+    const statusProgress = job.status === 'pending' ? 0.25 : 0.75;
+    const nextProgress = Math.min(96, Math.round(8 + documentBase + (documentShare * statusProgress)));
+
+    setScanProgress((current) => Math.max(current, nextProgress));
+  };
+
+  const runUploadedOcr = async (documents: CustomDocument[]) => {
+    clearProcessTimers();
+    cancelOcrRequest();
+
+    const controller = new AbortController();
+    ocrAbortRef.current = controller;
+
+    setApiErrorMessage(null);
+    setProcessStage('segmenting');
+    setScanProgress(8);
+    setCompletedModels({ segmentationModel: '', transliterationModel: '' });
+
+    const processedDocuments: CustomDocument[] = [];
+
+    try {
+      for (const [index, item] of documents.entries()) {
+        const createdJob = await createOcrJob({
+          file: item.file,
+          documentName: item.doc.title,
+          modelName,
+          signal: controller.signal,
+        });
+
+        updateCustomDocument(item.doc.id, (current) => ({ ...current, job: createdJob }));
+        updatePollingProgress(createdJob, index, documents.length);
+
+        const completedJob = await waitForOcrJob(
+          createdJob.id,
+          controller.signal,
+          (job) => {
+            updateCustomDocument(item.doc.id, (current) => ({ ...current, job }));
+            updatePollingProgress(job, index, documents.length);
+          },
+        );
+
+        if (terminalFailureStatuses.has(completedJob.status)) {
+          throw new Error(
+            completedJob.error_message
+            || (completedJob.status === 'model_missing'
+              ? 'Kraken model is missing on the backend server.'
+              : 'OCR job failed on the backend server.'),
+          );
+        }
+
+        processedDocuments.push({
+          ...item,
+          job: completedJob,
+          doc: documentFromOcrJob(item, completedJob),
+        });
+      }
+
+      if (controller.signal.aborted) return;
+
+      setCustomDocuments(processedDocuments);
+      setSelectedDoc((current) => (
+        processedDocuments.find((item) => item.doc.id === current.id)?.doc
+        ?? processedDocuments[0]?.doc
+        ?? current
+      ));
+      setCompletedModels({ segmentationModel: modelName, transliterationModel: '' });
+      setScanProgress(100);
+      setProcessStage('segmented');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+
+      setApiErrorMessage(error instanceof Error ? error.message : 'OCR API request failed.');
+      setCompletedModels({ segmentationModel: '', transliterationModel: '' });
+      setScanProgress(0);
+      setProcessStage('failed');
+    } finally {
+      if (ocrAbortRef.current === controller) {
+        ocrAbortRef.current = null;
+      }
+    }
+  };
+
   const startSegmentation = () => {
-    if (processStage !== 'idle') return;
+    if (processStage !== 'idle' && processStage !== 'failed') return;
     onResearcherReviewedChange(false);
+
+    if (customDocuments.length) {
+      void runUploadedOcr(customDocuments);
+      return;
+    }
+
     runProcess('segmenting', () => {
       setCompletedModels((current) => ({ ...current, segmentationModel: modelName }));
       setProcessStage('segmented');
@@ -229,10 +401,30 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       setCompletedModels((current) => ({ ...current, transliterationModel: modelName }));
       setProcessStage('complete');
 
+      if (customDocuments.length) {
+        customDocuments.forEach((item, index) => {
+          const isSelected = item.doc.id === selectedDoc.id;
+          const latinText = isSelected ? editedLines.join(' ') : item.doc.latinText;
+
+          onScanCompleted({
+            id: `scan-${item.job?.id ?? `${Date.now()}-${index}`}`,
+            date: scanHistoryDate(),
+            fileName: item.name,
+            title: item.doc.title,
+            rawBosančicaText: item.doc.rawBosančicaText,
+            latinText,
+            accuracy: Number(item.job?.confidence ?? 0),
+            durationMs: Number(item.job?.duration_ms ?? 0),
+          });
+        });
+
+        return;
+      }
+
       const newHistoryItem: ScanItem = {
         id: `scan-${Date.now()}`,
-        date: 'Danas, uzastopni test',
-        fileName: customFile ? customFile.name : `${selectedDoc.title.toLowerCase().replace(/\s+/g, '_')}.jpg`,
+        date: scanHistoryDate(),
+        fileName: `${selectedDoc.title.toLowerCase().replace(/\s+/g, '_')}.jpg`,
         title: selectedDoc.title,
         rawBosančicaText: selectedDoc.rawBosančicaText,
         latinText: editedLines.join(' '),
@@ -241,22 +433,6 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       };
       onScanCompleted(newHistoryItem);
 
-      if (customFile && customDocuments.length > 1) {
-        customDocuments
-          .filter((item) => item.doc.id !== selectedDoc.id)
-          .forEach((item, index) => {
-            onScanCompleted({
-              id: `scan-${Date.now()}-${index + 1}`,
-              date: 'Danas, uzastopni test',
-              fileName: item.name,
-              ...item.doc,
-              title: item.doc.title,
-              latinText: item.doc.latinText,
-              accuracy: parseFloat((94 + Math.random() * 5).toFixed(1)),
-              durationMs: Math.floor(600 + Math.random() * 800),
-            });
-          });
-      }
     });
   };
 
@@ -270,7 +446,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           <h2>{selectedDoc.title}</h2>
           <p className="document-location">
             <MapPin size={13} />
-            <span>{editedLocation} · {selectedDoc.year}</span>
+            <span>{editedLocation} Â· {selectedDoc.year}</span>
             <Button
               type="button"
               className="document-location__edit"
@@ -306,7 +482,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         </div>
 
         <div className="document-meta-panel__facts">
-          <span><CalendarClock size={14} /> Obrađeno: {showResult ? processedAt : 'nije pokrenuto'}</span>
+          <span><CalendarClock size={14} /> ObraÄ‘eno: {showResult ? processedAt : 'nije pokrenuto'}</span>
           <span><FileText size={14} /> Segmenti: {selectedDoc.lines.length}</span>
         </div>
 
@@ -358,7 +534,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           {customDocuments.length > 0 && (
             <div className="mt-5 pt-4 border-t border-[#2A2A2A]">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[9px] text-stone-500 uppercase tracking-widest font-mono">Učitani dokumenti</span>
+                <span className="text-[9px] text-stone-500 uppercase tracking-widest font-mono">UÄitani dokumenti</span>
                 <span className="text-[9px] text-[#C5A059] font-mono">{customDocuments.length} slika</span>
               </div>
               <div className="flex gap-2 overflow-x-auto pb-1">
@@ -451,8 +627,10 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
               <div className="text-center p-6 z-10 max-w-xs">
                 <Layers className="w-10 h-10 text-[#C5A059]/40 mx-auto mb-3" />
                 <p className="text-xs text-stone-300 font-medium font-serif leading-relaxed">
-                  {processStage === 'segmented'
-                    ? 'Segmentacija je završena. Pokrenite transliteraciju u zaglavlju.'
+                  {hasProcessFailed
+                    ? (apiErrorMessage ?? 'OCR API request failed.')
+                    : processStage === 'segmented'
+                    ? 'Segmentacija je zavrÅ¡ena. Pokrenite transliteraciju u zaglavlju.'
                     : `Pokrenite segmentaciju u zaglavlju za obradu modelom ${modelName}.`}
                 </p>
               </div>
@@ -477,7 +655,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             {showResult && (
               <span className="px-3 py-1 text-xs rounded-full bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 flex items-center gap-1.5 font-mono">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Uspješno dešifrovano
+                UspjeÅ¡no deÅ¡ifrovano
               </span>
             )}
           </div>
@@ -486,7 +664,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             <div className="flex-grow flex flex-col items-center justify-center p-10 text-center animate-pulse">
               <RefreshCw className="w-8 h-8 text-[#C5A059] animate-spin mb-4" />
               <p className="text-sm text-stone-300 font-serif">
-                {processStage === 'segmenting' ? 'Segmentiram redove dokumenta...' : 'Dešifrujem ligaturna spajanja...'}
+                {processStage === 'segmenting' ? 'Segmentiram redove dokumenta...' : 'DeÅ¡ifrujem ligaturna spajanja...'}
               </p>
               <p className="text-xs text-stone-500 mt-1">Napredak obrade: {scanProgress}%</p>
             </div>
@@ -496,10 +674,12 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             <div className="flex-grow flex flex-col items-center justify-center p-12 text-center text-stone-500">
               <FileText className="w-12 h-12 text-[#2A2A2A] mb-3" />
               <p className="text-sm font-serif">
-                {processStage === 'segmented' ? 'Segmentacija je spremna.' : 'Čekam segmentaciju dokumenta...'}
+                {hasProcessFailed ? 'OCR API request failed.' : processStage === 'segmented' ? 'Segmentacija je spremna.' : 'ÄŒekam segmentaciju dokumenta...'}
               </p>
               <p className="text-xs text-stone-600 mt-0.5">
-                {processStage === 'segmented'
+                {hasProcessFailed
+                  ? (apiErrorMessage ?? 'Use Segmentacija to retry.')
+                  : processStage === 'segmented'
                   ? 'Pokrenite transliteraciju iz zaglavlja.'
                   : 'Pokrenite prvi korak obrade iz zaglavlja.'}
               </p>
@@ -574,11 +754,11 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
               {/* INTEGRATED FULL TEXT EXPORT */}
               <div className="mt-4 p-4 rounded-xl bg-black/45 border border-[#2A2A2A]">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-stone-400 font-serif">Kompletan Latinični Tekst</span>
+                  <span className="text-xs text-stone-400 font-serif">Kompletan LatiniÄni Tekst</span>
                   <PrimaryButton
                     onClick={() => {
                       navigator.clipboard.writeText(editedLines.join(' '));
-                      alert('Tekst uspješno kopiran u međumemoriju!');
+                      alert('Tekst uspjeÅ¡no kopiran u meÄ‘umemoriju!');
                     }}
                     className="copy-text-button"
                   >
@@ -630,7 +810,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             />
             <div className="location-modal__actions">
               <Button type="button" onClick={() => setLocationModalOpen(false)}>Odustani</Button>
-              <Button type="submit">Sačuvaj lokaciju</Button>
+              <Button type="submit">SaÄuvaj lokaciju</Button>
             </div>
           </form>
         </div>

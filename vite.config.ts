@@ -49,6 +49,8 @@ const gpuStatusPlugin = {
   },
 };
 
+const backendApiUrl = process.env.VITE_BACKEND_API_URL || process.env.BACKEND_API_URL || 'http://127.0.0.1:8001';
+
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss(), gpuStatusPlugin],
@@ -63,6 +65,28 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      proxy: {
+        '/api/health': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+        '/api/ocr': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+      },
+    },
+    preview: {
+      proxy: {
+        '/api/health': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+        '/api/ocr': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

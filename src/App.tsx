@@ -304,6 +304,7 @@ export default function App() {
     : 0;
   const segmentationComplete = ['segmented', 'transliterating', 'complete'].includes(scanProcessStatus.stage);
   const transliterationComplete = scanProcessStatus.stage === 'complete';
+  const segmentationFailed = scanProcessStatus.stage === 'failed';
 
   const handleLoginSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -752,9 +753,9 @@ export default function App() {
                       </div>
                       <Button
                         type="button"
-                        disabled={scanProcessStatus.stage !== 'idle'}
+                        disabled={scanProcessStatus.stage !== 'idle' && scanProcessStatus.stage !== 'failed'}
                         onClick={() => scanWorkflowRef.current?.startSegmentation()}
-                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'segmenting' ? 'is-running' : ''} ${segmentationComplete ? 'is-complete' : ''}`}
+                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'segmenting' ? 'is-running' : ''} ${segmentationComplete ? 'is-complete' : ''} ${segmentationFailed ? 'is-failed' : ''}`}
                       >
                         <ScanLine size={16} />
                         <div>
@@ -762,7 +763,9 @@ export default function App() {
                           <strong>
                             {scanProcessStatus.stage === 'segmenting'
                               ? `U toku ${scanProcessStatus.progress}%`
-                              : segmentationComplete
+                              : segmentationFailed
+                                ? 'Greska - pokusaj ponovo'
+                                : segmentationComplete
                                 ? `Gotova · ${scanProcessStatus.segmentationModel || activeModel.label}`
                                 : 'Pokreni segmentaciju'}
                           </strong>

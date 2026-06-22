@@ -590,6 +590,8 @@ button:disabled { cursor: not-allowed; }
 .transcription-modelbar__process.is-running > svg { animation: spin 1.4s linear infinite; }
 .transcription-modelbar__process.is-complete:disabled { border-color: #3f5d43; color: #8cc596; background: #172019; opacity: 1; }
 .transcription-modelbar__process.is-complete > svg, .transcription-modelbar__process.is-complete strong { color: #8cc596; }
+.transcription-modelbar__process.is-failed { border-color: #6f3434; color: #e58b8b; background: #241616; opacity: 1; }
+.transcription-modelbar__process.is-failed > svg, .transcription-modelbar__process.is-failed strong { color: #e58b8b; }
 .transcription-modelbar__review {
   width: 100%;
   min-width: 0;
