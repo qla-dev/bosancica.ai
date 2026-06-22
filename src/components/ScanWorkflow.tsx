@@ -707,7 +707,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       }}
       className={`absolute z-20 border rounded cursor-pointer transition-all duration-300 ${
         activeLine === idx
-          ? 'border-[#C5A059] bg-[#C5A059]/10 shadow-[0_0_15px_rgba(197,160,89,0.25)]'
+          ? 'border-[#C5A059] bg-[#C5A059]/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.88),0_0_18px_rgba(197,160,89,0.35)]'
           : 'border-white/10 bg-black/10'
       }`}
     >
@@ -770,9 +770,9 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
 
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 items-start gap-8">
       {/* LEFT COLUMN: Preset selector & upload & active file preview */}
-      <div className="lg:col-span-5 flex flex-col gap-6">
+      <div className="lg:col-span-5 lg:sticky lg:top-20 self-start flex w-full flex-col gap-6">
         {/* PRESET PAPERS */}
         {false && !focusDocumentView && (
         <div className="p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm">
@@ -849,7 +849,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         )}
 
         {/* WORKSPACE PREVIEW FRAME */}
-        <div className="relative flex flex-col p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm overflow-hidden flex-1 select-none">
+        <div className="relative flex flex-col p-6 rounded-2xl bg-[#0F0F0F] border border-[#2A2A2A] backdrop-blur-sm overflow-hidden select-none">
           <p className="text-xs font-serif text-[#C5A059] uppercase tracking-[0.2em] mb-3">
             Vizuelni segmenter ({modelName})
           </p>
