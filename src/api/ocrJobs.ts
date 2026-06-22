@@ -1,4 +1,5 @@
 export type OcrJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'model_missing' | string;
+export type SegmentJobStatus = 'pending' | 'running' | 'segmented' | 'failed' | string;
 
 export type OcrJobLine = {
   index?: number;
@@ -18,8 +19,53 @@ export interface OcrJob {
   error_message?: string | null;
 }
 
+export type SegmentLine = {
+  index?: number;
+  id?: string | null;
+  text?: string | null;
+  bbox?: [number, number, number, number] | number[];
+  left?: number | null;
+  top?: number | null;
+  width?: number | null;
+  height?: number | null;
+  boundary?: unknown;
+  baseline?: unknown;
+};
+
+export interface SegmentResponse {
+  status: 'segmented' | string;
+  document_name?: string | null;
+  lines?: SegmentLine[] | null;
+  duration_ms?: number | null;
+  metadata?: {
+    width?: number;
+    height?: number;
+    [key: string]: unknown;
+  } | null;
+  warnings?: string[];
+}
+
+export interface SegmentJob {
+  id: number;
+  document_name?: string | null;
+  original_filename?: string | null;
+  status: SegmentJobStatus;
+  output_lines?: SegmentLine[] | null;
+  output_metadata?: {
+    width?: number;
+    height?: number;
+    [key: string]: unknown;
+  } | null;
+  duration_ms?: number | null;
+  error_message?: string | null;
+}
+
 interface OcrJobResponse {
   data: OcrJob;
+}
+
+interface SegmentJobResponse {
+  data: SegmentJob;
 }
 
 interface CreateOcrJobOptions {
@@ -28,6 +74,8 @@ interface CreateOcrJobOptions {
   modelName?: string;
   signal?: AbortSignal;
 }
+
+type CreateSegmentJobOptions = Omit<CreateOcrJobOptions, 'modelName'>;
 
 const apiHeaders = {
   Accept: 'application/json',
@@ -92,6 +140,24 @@ export const createOcrJob = async ({
   return payload.data;
 };
 
+export const createSegmentJob = async ({
+  file,
+  documentName,
+  signal,
+}: CreateSegmentJobOptions) => {
+  const body = new FormData();
+  body.append('document', file);
+  if (documentName?.trim()) body.append('document_name', documentName.trim());
+
+  const payload = await requestJson<SegmentJobResponse>('/api/ocr/segments', {
+    method: 'POST',
+    body,
+    signal,
+  });
+
+  return payload.data;
+};
+
 export const getOcrJob = async (jobId: number, signal?: AbortSignal) => {
   const payload = await requestJson<OcrJobResponse>(`/api/ocr/jobs/${jobId}`, { signal });
   return payload.data;
@@ -101,6 +167,16 @@ export const isOcrJobTerminal = (job: OcrJob) => (
   job.status === 'completed'
   || job.status === 'failed'
   || job.status === 'model_missing'
+);
+
+export const getSegmentJob = async (jobId: number, signal?: AbortSignal) => {
+  const payload = await requestJson<SegmentJobResponse>(`/api/ocr/segments/${jobId}`, { signal });
+  return payload.data;
+};
+
+export const isSegmentJobTerminal = (job: SegmentJob) => (
+  job.status === 'segmented'
+  || job.status === 'failed'
 );
 
 const sleep = (milliseconds: number, signal?: AbortSignal) => (
@@ -135,6 +211,21 @@ export const waitForOcrJob = async (
     onUpdate?.(job);
 
     if (isOcrJobTerminal(job)) return job;
+
+    await sleep(1500, signal);
+  }
+};
+
+export const waitForSegmentJob = async (
+  jobId: number,
+  signal?: AbortSignal,
+  onUpdate?: (job: SegmentJob) => void,
+) => {
+  while (true) {
+    const job = await getSegmentJob(jobId, signal);
+    onUpdate?.(job);
+
+    if (isSegmentJobTerminal(job)) return job;
 
     await sleep(1500, signal);
   }

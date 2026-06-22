@@ -1,5 +1,12 @@
 ﻿import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { createOcrJob, OcrJob, waitForOcrJob } from '../api/ocrJobs';
+import {
+  createOcrJob,
+  createSegmentJob,
+  OcrJob,
+  SegmentJob,
+  waitForOcrJob,
+  waitForSegmentJob,
+} from '../api/ocrJobs';
 import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
 import BosancicaHoverText from './BosancicaHoverText';
@@ -41,10 +48,39 @@ type CustomDocument = {
   url: string;
   file: File;
   doc: PresetDocument;
-  job?: OcrJob | null;
+  ocrJob?: OcrJob | null;
+  segmentJob?: SegmentJob | null;
 };
 
-const terminalFailureStatuses = new Set(['failed', 'model_missing']);
+const terminalOcrFailureStatuses = new Set(['failed', 'model_missing']);
+
+const clampPercentage = (value: number, fallback: number) => {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(100, value));
+};
+
+const clampLineBox = (
+  line: {
+    left?: number | null;
+    top?: number | null;
+    width?: number | null;
+    height?: number | null;
+  },
+  fallbackTop: number,
+  fallbackHeight: number,
+) => {
+  const left = Math.min(98, clampPercentage(typeof line.left === 'number' ? line.left : 4, 4));
+  const top = Math.min(98, clampPercentage(typeof line.top === 'number' ? line.top : fallbackTop, fallbackTop));
+  const rawWidth = clampPercentage(typeof line.width === 'number' ? line.width : 92, 92);
+  const rawHeight = clampPercentage(typeof line.height === 'number' ? line.height : fallbackHeight, fallbackHeight);
+
+  return {
+    left,
+    top,
+    width: Math.max(2, Math.min(rawWidth, 100 - left)),
+    height: Math.max(2, Math.min(rawHeight, 100 - top)),
+  };
+};
 
 const normalizeOcrLineText = (line: unknown) => {
   if (typeof line === 'string') return line.trim();
@@ -69,6 +105,30 @@ const ocrLinesFromJob = (job: OcrJob) => {
     .filter(Boolean);
 };
 
+const documentFromSegmentJob = (item: CustomDocument, segment: SegmentJob): PresetDocument => {
+  const segmentLines = Array.isArray(segment.output_lines) ? segment.output_lines : [];
+  const safeLines = segmentLines.length ? segmentLines : [{ index: 1, top: 25, height: 18 }];
+  const fallbackHeight = Math.max(8, Math.min(18, 72 / Math.max(safeLines.length, 1)));
+  const fallbackStep = 76 / Math.max(safeLines.length, 1);
+  const summary = `Segmentirano ${safeLines.length} redova.`;
+
+  return {
+    ...item.doc,
+    previewFit: 'contain',
+    rawBosančicaText: summary,
+    latinText: summary,
+    lines: safeLines.map((line, index) => {
+      const box = clampLineBox(line, 12 + (index * fallbackStep), fallbackHeight);
+
+      return {
+        textBosančica: `Segment ${index + 1}`,
+        textLatinica: `Segment ${index + 1}`,
+        ...box,
+      };
+    }),
+  };
+};
+
 const documentFromOcrJob = (item: CustomDocument, job: OcrJob): PresetDocument => {
   const lineTexts = ocrLinesFromJob(job);
   const fallbackText = job.output_text?.trim() || item.doc.latinText;
@@ -80,12 +140,18 @@ const documentFromOcrJob = (item: CustomDocument, job: OcrJob): PresetDocument =
     ...item.doc,
     rawBosančicaText: fallbackText,
     latinText: safeLines.join(' '),
-    lines: safeLines.map((text, index) => ({
-      textBosančica: text,
-      textLatinica: text,
-      top: 12 + (index * lineStep),
-      height: lineHeight,
-    })),
+    lines: safeLines.map((text, index) => {
+      const geometry = item.doc.lines[index];
+
+      return {
+        textBosančica: text,
+        textLatinica: text,
+        left: geometry?.left,
+        width: geometry?.width,
+        top: geometry?.top ?? 12 + (index * lineStep),
+        height: geometry?.height ?? lineHeight,
+      };
+    }),
   };
 };
 
@@ -129,6 +195,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
   const ocrAbortRef = useRef<AbortController | null>(null);
   const isProcessing = processStage === 'segmenting' || processStage === 'transliterating';
   const isScanning = isProcessing;
+  const showSegmentRows = processStage === 'segmented';
   const showResult = processStage === 'complete';
   const hasProcessFailed = processStage === 'failed';
 
@@ -157,23 +224,24 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       const fakeDoc: PresetDocument = {
         id: `custom-${file.lastModified}-${index}`,
         title: initialDocumentName
-          ? `${initialDocumentName}${initialFiles.length > 1 ? ` Â· ${index + 1}` : ''}`
+          ? `${initialDocumentName}${initialFiles.length > 1 ? ` · ${index + 1}` : ''}`
           : file.name.substring(0, 24) || 'Uvezeni dokument',
         year: 'Nepoznat period',
-        origin: 'UÄitano sa lokalnog raÄunara',
+        origin: 'Učitano sa lokalnog računara',
         imageUrl: fakeUrl,
-        rawBosančicaText: 'â°– â°‰â°â°… â°‘â°ªA â°‰ â°”â°‰â°A â°‰ â°”â°‚â°…â°•â°‘â°ƒA â°„â°–â°˜A.',
+        previewFit: 'contain',
+        rawBosančicaText: 'Ⱆ ⰉⰏⰅ ⰑⰪA Ⰹ ⰔⰉⰐA Ⰹ ⰔⰂⰅⰕⰑⰃA ⰄⰖⰘA.',
         latinText: 'Automatski detektovan tekst u starom bosanskom pismu.',
         lines: [
           {
-            textBosančica: 'â°– â°‰â°â°… â°‘â°ªA â°‰ â°”â°‰â°A',
+            textBosančica: 'Ⱆ ⰉⰏⰅ ⰑⰪA Ⰹ ⰔⰉⰐA',
             textLatinica: 'U ime oca i sina i svetoga duha.',
             top: 30,
             height: 20
           },
           {
-            textBosančica: 'â°¡ â°Aâ°â°  â°â°‘â°”â°â° â°”â°â°‰ â°â°– Jews',
-            textLatinica: 'Ja, ban bosanski, svedoÄim narodu.',
+            textBosančica: 'Ⱑ ⰁAⰐⰠ ⰁⰑⰔⰐⰠⰔⰍⰉ ⰍⰖⰎⰉⰐⰠ',
+            textLatinica: 'Ja, ban bosanski, svjedočim narodu.',
             top: 60,
             height: 20
           }
@@ -195,6 +263,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       setApiErrorMessage(null);
       setActiveLine(null);
       onResearcherReviewedChange(false);
+      void runUploadedSegmentation(documents);
   };
 
   useEffect(() => {
@@ -226,12 +295,12 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
   const statusItems = [
     {
       label: hasProcessFailed
-        ? 'Greska u obradi'
+        ? 'Greška u obradi'
         : segmentationComplete
           ? 'Segmentacija gotova'
           : processStage === 'segmenting'
             ? 'Segmentacija u toku'
-            : 'Ceka segmentaciju',
+            : 'Čeka segmentaciju',
       complete: segmentationComplete,
     },
     {
@@ -241,11 +310,11 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           ? 'Transliteracija u toku'
           : segmentationComplete
             ? 'Transliteracija spremna'
-            : 'ÄŒeka transliteraciju',
+            : 'Čeka transliteraciju',
       complete: transliterationComplete,
     },
     {
-      label: researcherReviewed ? 'Kontrola istraÅ¾ivaÄa gotova' : 'Kontrola istraÅ¾ivaÄa Äeka',
+      label: researcherReviewed ? 'Kontrola istraživača gotova' : 'Kontrola istraživača čeka',
       complete: researcherReviewed,
     },
   ];
@@ -295,16 +364,16 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     )));
   };
 
-  const updatePollingProgress = (job: OcrJob, documentIndex: number, totalDocuments: number) => {
+  const updateQueuedProgress = (status: string, documentIndex: number, totalDocuments: number) => {
     const documentShare = 90 / Math.max(totalDocuments, 1);
     const documentBase = documentIndex * documentShare;
-    const statusProgress = job.status === 'pending' ? 0.25 : 0.75;
+    const statusProgress = status === 'pending' ? 0.25 : 0.75;
     const nextProgress = Math.min(96, Math.round(8 + documentBase + (documentShare * statusProgress)));
 
     setScanProgress((current) => Math.max(current, nextProgress));
   };
 
-  const runUploadedOcr = async (documents: CustomDocument[]) => {
+  const runUploadedSegmentation = async (documents: CustomDocument[]) => {
     clearProcessTimers();
     cancelOcrRequest();
 
@@ -317,6 +386,94 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     setCompletedModels({ segmentationModel: '', transliterationModel: '' });
 
     const processedDocuments: CustomDocument[] = [];
+    let progress = 8;
+
+    processIntervalRef.current = window.setInterval(() => {
+      progress = Math.min(90, progress + 4);
+      setScanProgress((current) => Math.max(current, progress));
+    }, 180);
+
+    try {
+      for (const [index, item] of documents.entries()) {
+        const createdJob = await createSegmentJob({
+          file: item.file,
+          documentName: item.doc.title,
+          signal: controller.signal,
+        });
+
+        updateCustomDocument(item.doc.id, (current) => ({ ...current, segmentJob: createdJob }));
+        updateQueuedProgress(createdJob.status, index, documents.length);
+
+        const completedJob = await waitForSegmentJob(
+          createdJob.id,
+          controller.signal,
+          (job) => {
+            updateCustomDocument(item.doc.id, (current) => ({ ...current, segmentJob: job }));
+            updateQueuedProgress(job.status, index, documents.length);
+          },
+        );
+
+        if (completedJob.status === 'failed') {
+          throw new Error(completedJob.error_message || 'Kraken segmentation job failed.');
+        }
+
+        const segmentedItem = {
+          ...item,
+          segmentJob: completedJob,
+          doc: documentFromSegmentJob(item, completedJob),
+        };
+
+        updateCustomDocument(item.doc.id, () => segmentedItem);
+        processedDocuments.push(segmentedItem);
+        setScanProgress(Math.min(98, Math.round(8 + (((index + 1) / documents.length) * 90))));
+      }
+
+      if (controller.signal.aborted) return;
+
+      clearProcessTimers();
+      setCustomDocuments(processedDocuments);
+      setSelectedDoc((current) => (
+        processedDocuments.find((item) => item.doc.id === current.id)?.doc
+        ?? processedDocuments[0]?.doc
+        ?? current
+      ));
+      setCompletedModels({ segmentationModel: 'Kraken segmenter', transliterationModel: '' });
+      setScanProgress(100);
+      setProcessStage('segmented');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+
+      clearProcessTimers();
+      setApiErrorMessage(error instanceof Error ? error.message : 'Kraken segmentation request failed.');
+      setCompletedModels({ segmentationModel: '', transliterationModel: '' });
+      setScanProgress(0);
+      setProcessStage('failed');
+    } finally {
+      if (ocrAbortRef.current === controller) {
+        ocrAbortRef.current = null;
+      }
+    }
+  };
+
+  const runUploadedTransliteration = async (documents: CustomDocument[]) => {
+    clearProcessTimers();
+    cancelOcrRequest();
+
+    const controller = new AbortController();
+    ocrAbortRef.current = controller;
+
+    setApiErrorMessage(null);
+    setProcessStage('transliterating');
+    setScanProgress(8);
+    setCompletedModels((current) => ({ ...current, transliterationModel: '' }));
+
+    const processedDocuments: CustomDocument[] = [];
+    let progress = 8;
+
+    processIntervalRef.current = window.setInterval(() => {
+      progress = Math.min(90, progress + 4);
+      setScanProgress((current) => Math.max(current, progress));
+    }, 180);
 
     try {
       for (const [index, item] of documents.entries()) {
@@ -327,50 +484,68 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           signal: controller.signal,
         });
 
-        updateCustomDocument(item.doc.id, (current) => ({ ...current, job: createdJob }));
-        updatePollingProgress(createdJob, index, documents.length);
+        updateCustomDocument(item.doc.id, (current) => ({ ...current, ocrJob: createdJob }));
+        updateQueuedProgress(createdJob.status, index, documents.length);
 
         const completedJob = await waitForOcrJob(
           createdJob.id,
           controller.signal,
           (job) => {
-            updateCustomDocument(item.doc.id, (current) => ({ ...current, job }));
-            updatePollingProgress(job, index, documents.length);
+            updateCustomDocument(item.doc.id, (current) => ({ ...current, ocrJob: job }));
+            updateQueuedProgress(job.status, index, documents.length);
           },
         );
 
-        if (terminalFailureStatuses.has(completedJob.status)) {
+        if (terminalOcrFailureStatuses.has(completedJob.status)) {
           throw new Error(
             completedJob.error_message
             || (completedJob.status === 'model_missing'
-              ? 'Kraken model is missing on the backend server.'
-              : 'OCR job failed on the backend server.'),
+              ? 'Kraken OCR model is missing on the backend server.'
+              : 'Transliteration job failed on the backend server.'),
           );
         }
 
-        processedDocuments.push({
+        const ocrItem = {
           ...item,
-          job: completedJob,
+          ocrJob: completedJob,
           doc: documentFromOcrJob(item, completedJob),
-        });
+        };
+
+        updateCustomDocument(item.doc.id, () => ocrItem);
+        processedDocuments.push(ocrItem);
+        setScanProgress(Math.min(98, Math.round(8 + (((index + 1) / documents.length) * 90))));
       }
 
       if (controller.signal.aborted) return;
 
+      clearProcessTimers();
       setCustomDocuments(processedDocuments);
       setSelectedDoc((current) => (
         processedDocuments.find((item) => item.doc.id === current.id)?.doc
         ?? processedDocuments[0]?.doc
         ?? current
       ));
-      setCompletedModels({ segmentationModel: modelName, transliterationModel: '' });
+      setCompletedModels((current) => ({ ...current, transliterationModel: modelName }));
       setScanProgress(100);
-      setProcessStage('segmented');
+      setProcessStage('complete');
+
+      processedDocuments.forEach((item, index) => {
+        onScanCompleted({
+          id: `scan-${item.ocrJob?.id ?? `${Date.now()}-${index}`}`,
+          date: scanHistoryDate(),
+          fileName: item.name,
+          title: item.doc.title,
+          rawBosančicaText: item.doc.rawBosančicaText,
+          latinText: item.doc.latinText,
+          accuracy: Number(item.ocrJob?.confidence ?? 0),
+          durationMs: Number(item.ocrJob?.duration_ms ?? 0),
+        });
+      });
     } catch (error) {
       if (controller.signal.aborted) return;
 
-      setApiErrorMessage(error instanceof Error ? error.message : 'OCR API request failed.');
-      setCompletedModels({ segmentationModel: '', transliterationModel: '' });
+      clearProcessTimers();
+      setApiErrorMessage(error instanceof Error ? error.message : 'Transliteration job failed.');
       setScanProgress(0);
       setProcessStage('failed');
     } finally {
@@ -385,7 +560,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     onResearcherReviewedChange(false);
 
     if (customDocuments.length) {
-      void runUploadedOcr(customDocuments);
+      void runUploadedSegmentation(customDocuments);
       return;
     }
 
@@ -397,29 +572,15 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
 
   const startTransliteration = () => {
     if (processStage !== 'segmented') return;
+
+    if (customDocuments.length) {
+      void runUploadedTransliteration(customDocuments);
+      return;
+    }
+
     runProcess('transliterating', () => {
       setCompletedModels((current) => ({ ...current, transliterationModel: modelName }));
       setProcessStage('complete');
-
-      if (customDocuments.length) {
-        customDocuments.forEach((item, index) => {
-          const isSelected = item.doc.id === selectedDoc.id;
-          const latinText = isSelected ? editedLines.join(' ') : item.doc.latinText;
-
-          onScanCompleted({
-            id: `scan-${item.job?.id ?? `${Date.now()}-${index}`}`,
-            date: scanHistoryDate(),
-            fileName: item.name,
-            title: item.doc.title,
-            rawBosančicaText: item.doc.rawBosančicaText,
-            latinText,
-            accuracy: Number(item.job?.confidence ?? 0),
-            durationMs: Number(item.job?.duration_ms ?? 0),
-          });
-        });
-
-        return;
-      }
 
       const newHistoryItem: ScanItem = {
         id: `scan-${Date.now()}`,
@@ -438,6 +599,33 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
 
   useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [processStage, selectedDoc, editedLines, customDocuments]);
 
+  const previewUsesContainedImage = selectedDoc.previewFit === 'contain';
+  const renderSegmentLineOverlays = () => selectedDoc.lines.map((ln, idx) => (
+    <div
+      key={idx}
+      onMouseEnter={() => !isScanning && setActiveLine(idx)}
+      onMouseLeave={() => !isScanning && setActiveLine(null)}
+      style={{
+        left: `${ln.left ?? 4}%`,
+        top: `${ln.top}%`,
+        width: `${ln.width ?? 92}%`,
+        height: `${ln.height}%`,
+      }}
+      className={`absolute z-20 border rounded cursor-pointer transition-all duration-300 ${
+        activeLine === idx
+          ? 'border-[#C5A059] bg-[#C5A059]/10 shadow-[0_0_15px_rgba(197,160,89,0.25)]'
+          : 'border-white/10 bg-black/10'
+      }`}
+    >
+      <div className="absolute -top-3 left-2 bg-[#0F0F0F] text-[8px] text-[#C5A059] px-1.5 py-0.5 border border-[#2A2A2A] font-mono opacity-0 group-hover:opacity-100 transition-opacity">
+        Red #{idx + 1}
+      </div>
+    </div>
+  ));
+  const formatPercent = (value?: number) => (
+    typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}%` : 'n/a'
+  );
+
   return (
     <div className={`scan-workflow ${focusDocumentView ? 'scan-workflow--focused' : ''}`}>
       <section className="document-meta-panel">
@@ -446,7 +634,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           <h2>{selectedDoc.title}</h2>
           <p className="document-location">
             <MapPin size={13} />
-            <span>{editedLocation} Â· {selectedDoc.year}</span>
+            <span>{editedLocation} · {selectedDoc.year}</span>
             <Button
               type="button"
               className="document-location__edit"
@@ -482,7 +670,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         </div>
 
         <div className="document-meta-panel__facts">
-          <span><CalendarClock size={14} /> ObraÄ‘eno: {showResult ? processedAt : 'nije pokrenuto'}</span>
+          <span><CalendarClock size={14} /> Obrađeno: {showResult ? processedAt : 'nije pokrenuto'}</span>
           <span><FileText size={14} /> Segmenti: {selectedDoc.lines.length}</span>
         </div>
 
@@ -534,7 +722,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           {customDocuments.length > 0 && (
             <div className="mt-5 pt-4 border-t border-[#2A2A2A]">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[9px] text-stone-500 uppercase tracking-widest font-mono">UÄitani dokumenti</span>
+                <span className="text-[9px] text-stone-500 uppercase tracking-widest font-mono">Učitani dokumenti</span>
                 <span className="text-[9px] text-[#C5A059] font-mono">{customDocuments.length} slika</span>
               </div>
               <div className="flex gap-2 overflow-x-auto pb-1">
@@ -573,40 +761,37 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           </p>
 
           <div className="relative flex-1 bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#2A2A2A] min-h-[300px] flex items-center justify-center group">
-            {/* The Old Document Image */}
-            <div className="absolute inset-0 opacity-80 mix-blend-luminosity">
-              <img
-                src={selectedDoc.imageUrl}
-                alt="Bosančica scan"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover brightness-75 contrast-125"
-              />
-            </div>
-
-            {/* Vintage filter overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-black/30"></div>
-
-            {/* Simulated OCR segmentation line boundaries overlay */}
-            {selectedDoc.lines.map((ln, idx) => (
-              <div
-                key={idx}
-                onMouseEnter={() => !isScanning && setActiveLine(idx)}
-                onMouseLeave={() => !isScanning && setActiveLine(null)}
-                style={{
-                  top: `${ln.top}%`,
-                  height: `${ln.height}%`,
-                }}
-                className={`absolute left-4 right-4 border rounded cursor-pointer transition-all duration-300 ${
-                  activeLine === idx
-                    ? 'border-[#C5A059] bg-[#C5A059]/10 shadow-[0_0_15px_rgba(197,160,89,0.25)]'
-                    : 'border-white/5 bg-black/10'
-                }`}
-              >
-                <div className="absolute -top-3 left-2 bg-[#0F0F0F] text-[8px] text-[#C5A059] px-1.5 py-0.5 border border-[#2A2A2A] font-mono opacity-0 group-hover:opacity-100 transition-opacity">
-                  Red #{idx + 1}
+            {previewUsesContainedImage ? (
+              <div className="relative max-w-full max-h-full">
+                <img
+                  src={selectedDoc.imageUrl}
+                  alt="Bosančica scan"
+                  referrerPolicy="no-referrer"
+                  className="block max-w-full max-h-[70vh] object-contain brightness-95 contrast-110"
+                />
+                <div className="absolute inset-0">
+                  {renderSegmentLineOverlays()}
                 </div>
               </div>
-            ))}
+            ) : (
+              <>
+                <div className="absolute inset-0 opacity-80 mix-blend-luminosity">
+                  <img
+                    src={selectedDoc.imageUrl}
+                    alt="Bosančica scan"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover brightness-75 contrast-125"
+                  />
+                </div>
+                {renderSegmentLineOverlays()}
+              </>
+            )}
+
+            <div className={`absolute inset-0 z-10 pointer-events-none ${
+              previewUsesContainedImage
+                ? 'bg-gradient-to-t from-black/45 via-transparent to-black/10'
+                : 'bg-gradient-to-t from-black/90 via-transparent to-black/30'
+            }`}></div>
 
             {/* SCANNING LASER EFFECT */}
             {isScanning && (
@@ -623,14 +808,14 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             )}
 
             {/* NO ACTIVE SCAN WATERMARK */}
-            {!isScanning && !showResult && (
+            {!isScanning && !showResult && !showSegmentRows && (
               <div className="text-center p-6 z-10 max-w-xs">
                 <Layers className="w-10 h-10 text-[#C5A059]/40 mx-auto mb-3" />
                 <p className="text-xs text-stone-300 font-medium font-serif leading-relaxed">
                   {hasProcessFailed
-                    ? (apiErrorMessage ?? 'OCR API request failed.')
+                    ? (apiErrorMessage ?? 'Segmentacija nije uspjela.')
                     : processStage === 'segmented'
-                    ? 'Segmentacija je zavrÅ¡ena. Pokrenite transliteraciju u zaglavlju.'
+                    ? 'Segmentacija je završena. Pokrenite transliteraciju u zaglavlju.'
                     : `Pokrenite segmentaciju u zaglavlju za obradu modelom ${modelName}.`}
                 </p>
               </div>
@@ -646,16 +831,18 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           <div className="flex items-center justify-between mb-6 border-b border-[#2A2A2A] pb-4">
             <div>
               <h3 className="text-lg font-serif font-semibold text-stone-100">
-                AI rezultat i transliteracija
+                {showSegmentRows ? 'Segmentirani redovi' : 'AI rezultat i transliteracija'}
               </h3>
               <p className="text-xs text-stone-405 mt-0.5">
-                Drevne ligature izdvojene modelom {modelName}
+                {showSegmentRows
+                  ? `Kraken je izdvojio ${selectedDoc.lines.length} redova iz slike.`
+                  : `Drevne ligature izdvojene modelom ${modelName}`}
               </p>
             </div>
             {showResult && (
               <span className="px-3 py-1 text-xs rounded-full bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 flex items-center gap-1.5 font-mono">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                UspjeÅ¡no deÅ¡ifrovano
+                Uspješno dešifrovano
               </span>
             )}
           </div>
@@ -664,17 +851,67 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             <div className="flex-grow flex flex-col items-center justify-center p-10 text-center animate-pulse">
               <RefreshCw className="w-8 h-8 text-[#C5A059] animate-spin mb-4" />
               <p className="text-sm text-stone-300 font-serif">
-                {processStage === 'segmenting' ? 'Segmentiram redove dokumenta...' : 'DeÅ¡ifrujem ligaturna spajanja...'}
+                {processStage === 'segmenting' ? 'Segmentiram redove dokumenta...' : 'Dešifrujem ligaturna spajanja...'}
               </p>
               <p className="text-xs text-stone-500 mt-1">Napredak obrade: {scanProgress}%</p>
             </div>
           )}
 
-          {!isScanning && !showResult && (
+          {showSegmentRows && !isScanning && (
+            <div className="flex-grow flex flex-col gap-4">
+              <legend className="text-xs font-serif uppercase tracking-[0.2em] text-[#C5A059]">
+                Segmentacija po redovima
+              </legend>
+
+              <div className="flex flex-col gap-3">
+                {selectedDoc.lines.map((line, idx) => (
+                  <div
+                    key={idx}
+                    onMouseEnter={() => setActiveLine(idx)}
+                    onMouseLeave={() => setActiveLine(null)}
+                    className={`p-3.5 rounded-xl transition-all duration-200 border ${
+                      activeLine === idx
+                        ? 'bg-[#1A1A1A] border-[#C5A059]/80 translate-x-1 shadow-md'
+                        : 'bg-[#0A0A0A] border-[#2A2A2A]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[9px] font-mono bg-[#1A1A1A] border border-[#2A2A2A] px-1.5 py-0.5 rounded text-[#C5A059] font-bold">
+                        RED {idx + 1}
+                      </span>
+                      <span className="text-[10px] text-stone-500 font-mono">
+                        y {formatPercent(line.top)} · h {formatPercent(line.height)}
+                      </span>
+                      <div className="w-full border-t border-[#2A2A2A]/40"></div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5 bg-black/40 p-2.5 rounded-lg border border-[#2A2A2A]">
+                        <span className="text-[8px] text-stone-500 font-serif uppercase tracking-widest">
+                          Kraken segment
+                        </span>
+                        <strong className="text-sm text-stone-200 font-serif">{line.textBosančica}</strong>
+                      </div>
+                      <div className="flex flex-col gap-1.5 bg-[#1A1A1A]/30 p-2.5 rounded-lg border border-[#2A2A2A]">
+                        <span className="text-[8px] text-stone-500 font-serif uppercase tracking-widest">
+                          Koordinate
+                        </span>
+                        <p className="text-xs text-stone-300 font-mono">
+                          x {formatPercent(line.left)} · w {formatPercent(line.width)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!isScanning && !showResult && !showSegmentRows && (
             <div className="flex-grow flex flex-col items-center justify-center p-12 text-center text-stone-500">
               <FileText className="w-12 h-12 text-[#2A2A2A] mb-3" />
               <p className="text-sm font-serif">
-                {hasProcessFailed ? 'OCR API request failed.' : processStage === 'segmented' ? 'Segmentacija je spremna.' : 'ÄŒekam segmentaciju dokumenta...'}
+                {hasProcessFailed ? 'Segmentacija nije uspjela.' : processStage === 'segmented' ? 'Segmentacija je spremna.' : 'Čekam segmentaciju dokumenta...'}
               </p>
               <p className="text-xs text-stone-600 mt-0.5">
                 {hasProcessFailed
@@ -754,11 +991,11 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
               {/* INTEGRATED FULL TEXT EXPORT */}
               <div className="mt-4 p-4 rounded-xl bg-black/45 border border-[#2A2A2A]">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-stone-400 font-serif">Kompletan LatiniÄni Tekst</span>
+                  <span className="text-xs text-stone-400 font-serif">Kompletan Latinični Tekst</span>
                   <PrimaryButton
                     onClick={() => {
                       navigator.clipboard.writeText(editedLines.join(' '));
-                      alert('Tekst uspjeÅ¡no kopiran u meÄ‘umemoriju!');
+                      alert('Tekst uspješno kopiran u međumemoriju!');
                     }}
                     className="copy-text-button"
                   >
@@ -810,7 +1047,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
             />
             <div className="location-modal__actions">
               <Button type="button" onClick={() => setLocationModalOpen(false)}>Odustani</Button>
-              <Button type="submit">SaÄuvaj lokaciju</Button>
+              <Button type="submit">Sačuvaj lokaciju</Button>
             </div>
           </form>
         </div>

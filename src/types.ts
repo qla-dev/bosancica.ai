@@ -17,11 +17,14 @@ export interface PresetDocument {
   year: string;
   origin: string;
   imageUrl: string;
+  previewFit?: 'cover' | 'contain';
   rawBosančicaText: string;
   latinText: string;
   lines: {
     textBosančica: string;
     textLatinica: string;
+    left?: number; // percentage from left
+    width?: number; // percentage width
     top: number; // percentage from top
     height: number; // percentage height
   }[];
