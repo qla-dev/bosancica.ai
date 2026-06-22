@@ -57,14 +57,14 @@ const modelOptions: Array<{
   {
     id: 'kraken-bvision-local',
     label: 'Kraken BVision OCR',
-    description: 'qla.dev local server · :8002',
-    badge: 'Lokalno',
+    description: 'qla.dev local server',
+    badge: 'AKTIVNO',
   },
   {
     id: 'kraken-2-local',
-    label: 'Kraken 2',
-    description: 'Docker segmenter · :8003',
-    badge: 'Novo',
+    label: 'Kraken SHARP-256 OCR',
+    description: 'qla.dev local server',
+    badge: 'AKTIVNO',
   },
 ];
 

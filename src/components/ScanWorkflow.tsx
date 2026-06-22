@@ -930,7 +930,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
               <p className="text-xs text-stone-405 mt-0.5">
                 {showSegmentRows
                   ? `Kraken je izdvojio ${selectedDoc.lines.length} redova iz slike.`
-                  : `Drevne ligature izdvojene modelom ${modelName}`}
+                  : `Rezultati izdvojeni modelom ${modelName}`}
               </p>
             </div>
             {showResult && (
