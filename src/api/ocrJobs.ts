@@ -53,6 +53,7 @@ export interface SegmentJob {
   model_id?: string | null;
   model_name?: string | null;
   service_url?: string | null;
+  client_request_id?: string | null;
   status: SegmentJobStatus;
   output_lines?: SegmentLine[] | null;
   output_metadata?: {
@@ -85,6 +86,7 @@ interface CreateOcrJobOptions {
 
 type CreateSegmentJobOptions = CreateOcrJobOptions & {
   modelId?: string;
+  clientRequestId?: string;
 };
 
 const apiHeaders = {
@@ -155,6 +157,7 @@ export const createSegmentJob = async ({
   documentName,
   modelId,
   modelName,
+  clientRequestId,
   signal,
 }: CreateSegmentJobOptions) => {
   const body = new FormData();
@@ -162,6 +165,7 @@ export const createSegmentJob = async ({
   if (documentName?.trim()) body.append('document_name', documentName.trim());
   if (modelId?.trim()) body.append('model_id', modelId.trim());
   if (modelName?.trim()) body.append('model_name', modelName.trim());
+  if (clientRequestId?.trim()) body.append('client_request_id', clientRequestId.trim());
 
   const payload = await requestJson<SegmentJobResponse>('/api/ocr/segments', {
     method: 'POST',

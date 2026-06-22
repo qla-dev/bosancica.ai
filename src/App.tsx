@@ -35,6 +35,7 @@ type Workspace = 'home' | 'scanner' | 'archive' | 'trainer';
 type RecentDocument = {
   id: string;
   title: string;
+  uploadBatchId?: string;
   presetId?: string;
   files?: File[];
   segmentJob?: SegmentJob;
@@ -148,6 +149,10 @@ const processStatusFromSegmentJob = (job: SegmentJob): ScanProcessStatus => {
   return { stage: 'idle', progress: 0, segmentationModel: job.model_name ?? undefined };
 };
 
+const isRecentDocumentProcessing = (document: RecentDocument) => (
+  document.segmentJob?.status === 'pending' || document.segmentJob?.status === 'running'
+);
+
 export default function App() {
   const gpuInfo = useGpuInfo();
   const [authSessionExpiresAt, setAuthSessionExpiresAt] = useState<number | null>(readAuthSessionExpiration);
@@ -159,6 +164,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>('home');
   const [selectedModel, setSelectedModel] = useState(modelOptions[0].id);
   const [pendingUploads, setPendingUploads] = useState<File[]>([]);
+  const [pendingUploadBatchId, setPendingUploadBatchId] = useState<string | null>(null);
   const [documentName, setDocumentName] = useState('');
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [documentSelectionNonce, setDocumentSelectionNonce] = useState(0);
@@ -175,6 +181,7 @@ export default function App() {
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   const [selectedSegmentJob, setSelectedSegmentJob] = useState<SegmentJob | null>(null);
+  const recentDocumentsHaveProcessingJobs = recentDocuments.some(isRecentDocumentProcessing);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const singleImageInputRef = useRef<HTMLInputElement>(null);
@@ -232,6 +239,16 @@ export default function App() {
   }, [isAuthenticated, refreshSegmentHistory]);
 
   useEffect(() => {
+    if (!isAuthenticated || !recentDocumentsHaveProcessingJobs) return;
+
+    const historyRefreshTimer = window.setInterval(() => {
+      void refreshSegmentHistory();
+    }, 2500);
+
+    return () => window.clearInterval(historyRefreshTimer);
+  }, [isAuthenticated, recentDocumentsHaveProcessingJobs, refreshSegmentHistory]);
+
+  useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!modeMenuRef.current?.contains(target)) setModeMenuOpen(false);
@@ -263,6 +280,7 @@ export default function App() {
 
   const startNewConversation = () => {
     setPendingUploads([]);
+    setPendingUploadBatchId(null);
     setDocumentName('');
     setSelectedPresetId(null);
     setSelectedSegmentJob(null);
@@ -281,8 +299,11 @@ export default function App() {
       ? supportedFiles[0].name
       : `${supportedFiles[0].name} + ${supportedFiles.length - 1}`;
     const title = documentName.trim() || fallbackTitle;
-    const item: RecentDocument = { id: `upload-${Date.now()}`, title, files: supportedFiles };
+    const uploadBatchId = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const item: RecentDocument = { id: uploadBatchId, uploadBatchId, title, files: supportedFiles };
     setPendingUploads(supportedFiles);
+    setPendingUploadBatchId(uploadBatchId);
+    setDocumentName(title);
     setSelectedPresetId(null);
     setSelectedSegmentJob(null);
     setDocumentFocusMode(false);
@@ -359,6 +380,7 @@ export default function App() {
 
     setDocumentName(document.title);
     setPendingUploads([...(document.files ?? [])]);
+    setPendingUploadBatchId(document.uploadBatchId ?? (document.files?.length ? document.id : null));
     setSelectedPresetId(document.presetId ?? null);
     setSelectedSegmentJob(document.segmentJob ?? null);
     setDocumentFocusMode(true);
@@ -380,6 +402,16 @@ export default function App() {
   const segmentationComplete = ['segmented', 'transliterating', 'complete'].includes(scanProcessStatus.stage);
   const transliterationComplete = scanProcessStatus.stage === 'complete';
   const segmentationFailed = scanProcessStatus.stage === 'failed';
+  const activeUploadIsProcessing = ['segmenting', 'transliterating'].includes(scanProcessStatus.stage);
+
+  const isRecentDocumentActiveUpload = (document: RecentDocument) => {
+    const files = document.files;
+
+    if (!files?.length) return false;
+
+    return files.length === pendingUploads.length
+      && files.every((file, index) => file === pendingUploads[index]);
+  };
 
   const handleLoginSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -548,12 +580,28 @@ export default function App() {
               <span>Nedavno</span>
               <History size={13} />
             </div>
-            {recentDocuments.map((document) => (
-              <Button key={document.id} onClick={() => openRecentDocument(document)}>
-                <MessageSquareText size={15} />
-                <span>{document.title}</span>
-              </Button>
-            ))}
+            {recentDocuments.map((document) => {
+              const isProcessing = isRecentDocumentProcessing(document)
+                || (activeUploadIsProcessing && isRecentDocumentActiveUpload(document));
+
+              return (
+                <Button
+                  key={document.id}
+                  className={`sidebar-history-item${isProcessing ? ' is-processing' : ''}`}
+                  onClick={() => openRecentDocument(document)}
+                >
+                  <MessageSquareText size={15} />
+                  <span>{document.title}</span>
+                  {isProcessing && (
+                    <i
+                      className="sidebar-history-item__spinner"
+                      role="status"
+                      aria-label="Obrada u toku"
+                    />
+                  )}
+                </Button>
+              );
+            })}
           </div>
         )}
 
@@ -897,6 +945,7 @@ export default function App() {
                       key={`scanner-${documentSelectionNonce}`}
                       onScanCompleted={(newScan) => setScansHistory((current) => [newScan, ...current])}
                       initialFiles={pendingUploads}
+                      initialUploadBatchId={pendingUploadBatchId}
                       initialPresetId={selectedPresetId}
                       initialSegmentJob={selectedSegmentJob}
                       initialDocumentName={documentName.trim()}

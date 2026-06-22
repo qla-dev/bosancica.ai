@@ -34,6 +34,7 @@ interface ScanWorkflowProps {
   key?: string;
   onScanCompleted: (newScan: ScanItem) => void;
   initialFiles?: File[];
+  initialUploadBatchId?: string | null;
   initialPresetId?: string | null;
   initialSegmentJob?: SegmentJob | null;
   initialDocumentName?: string;
@@ -206,6 +207,7 @@ const scanHistoryDate = () => {
 const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function ScanWorkflow({
   onScanCompleted,
   initialFiles = [],
+  initialUploadBatchId,
   initialPresetId,
   initialSegmentJob,
   initialDocumentName,
@@ -313,6 +315,19 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       setActiveLine(null);
       onResearcherReviewedChange(false);
       void runUploadedSegmentation(documents);
+  };
+
+  const clientRequestIdForSegment = (item: CustomDocument) => {
+    if (!initialUploadBatchId) return undefined;
+
+    return [
+      initialUploadBatchId,
+      item.doc.id,
+      modelId || modelName,
+      item.file.name,
+      item.file.size,
+      item.file.lastModified,
+    ].join(':');
   };
 
   useEffect(() => {
@@ -466,6 +481,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
           documentName: item.doc.title,
           modelId,
           modelName,
+          clientRequestId: clientRequestIdForSegment(item),
           signal: controller.signal,
         });
 
@@ -667,7 +683,15 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
     });
   };
 
-  useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [processStage, selectedDoc, editedLines, customDocuments, modelId, modelName]);
+  useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [
+    processStage,
+    selectedDoc,
+    editedLines,
+    customDocuments,
+    modelId,
+    modelName,
+    initialUploadBatchId,
+  ]);
 
   const previewUsesContainedImage = selectedDoc.previewFit === 'contain';
   const renderSegmentLineOverlays = () => selectedDoc.lines.map((ln, idx) => (
