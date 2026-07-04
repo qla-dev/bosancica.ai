@@ -23,6 +23,7 @@ export type SegmentLine = {
   index?: number;
   id?: string | null;
   text?: string | null;
+  line_image_path?: string | null;
   bbox?: [number, number, number, number] | number[];
   left?: number | null;
   top?: number | null;
@@ -63,6 +64,9 @@ export interface SegmentJob {
   } | null;
   duration_ms?: number | null;
   error_message?: string | null;
+  kraken_response?: SegmentResponse | null;
+  openrouter_segments?: Record<string, unknown> | null;
+  ai_corrected_segments?: Record<string, unknown> | null;
 }
 
 interface OcrJobResponse {
@@ -198,6 +202,19 @@ export const getSegmentJob = async (jobId: number, signal?: AbortSignal) => {
 };
 
 export const getSegmentJobDocumentUrl = (jobId: number) => `/api/ocr/segments/${jobId}/document`;
+export const getSegmentJobLineImageUrl = (jobId: number, lineIndex: number) => `/api/ocr/segments/${jobId}/lines/${lineIndex}`;
+
+export const runAdditionalSegmentation = async (jobId: number, signal?: AbortSignal) => {
+  const payload = await requestJson<SegmentJobResponse>(
+    `/api/ocr/segments/${jobId}/additional-segmentation`,
+    {
+      method: 'POST',
+      signal,
+    },
+  );
+
+  return payload.data;
+};
 
 export const isSegmentJobTerminal = (job: SegmentJob) => (
   job.status === 'segmented'

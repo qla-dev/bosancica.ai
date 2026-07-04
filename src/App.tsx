@@ -17,6 +17,7 @@ import {
   ScanLine,
   Settings,
   ShieldCheck,
+  Trash2,
   Upload,
   UserRound,
 } from 'lucide-react';
@@ -90,6 +91,7 @@ const LOGIN_CREDENTIALS = {
 
 const AUTH_SESSION_STORAGE_KEY = 'bosancica.auth-session';
 const AUTH_SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
+const HIDDEN_SEGMENT_HISTORY_STORAGE_KEY = 'bosancica.hidden-segment-history';
 
 const readAuthSessionExpiration = () => {
   if (typeof window === 'undefined') return null;
@@ -112,6 +114,19 @@ const readAuthSessionExpiration = () => {
   } catch {
     window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
     return null;
+  }
+};
+
+const readHiddenSegmentHistory = () => {
+  if (typeof window === 'undefined') return [] as number[];
+
+  try {
+    const storedIds = JSON.parse(window.localStorage.getItem(HIDDEN_SEGMENT_HISTORY_STORAGE_KEY) ?? '[]');
+    if (!Array.isArray(storedIds)) return [];
+
+    return storedIds.filter((id): id is number => Number.isInteger(id) && id > 0);
+  } catch {
+    return [];
   }
 };
 
@@ -180,6 +195,7 @@ export default function App() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
+  const [hiddenSegmentJobIds, setHiddenSegmentJobIds] = useState<number[]>(readHiddenSegmentHistory);
   const [selectedSegmentJob, setSelectedSegmentJob] = useState<SegmentJob | null>(null);
   const recentDocumentsHaveProcessingJobs = recentDocuments.some(isRecentDocumentProcessing);
   const modeMenuRef = useRef<HTMLDivElement>(null);
@@ -213,7 +229,10 @@ export default function App() {
   const refreshSegmentHistory = useCallback(async (signal?: AbortSignal) => {
     try {
       const jobs = await listSegmentJobs(signal);
-      const persistedDocuments = jobs.map(recentDocumentFromSegmentJob);
+      const hiddenIds = new Set(hiddenSegmentJobIds);
+      const persistedDocuments = jobs
+        .filter((job) => !hiddenIds.has(job.id))
+        .map(recentDocumentFromSegmentJob);
 
       setRecentDocuments((current) => {
         const persistedTitles = new Set(persistedDocuments.map((document) => document.title));
@@ -227,7 +246,7 @@ export default function App() {
     } catch {
       // The scanner still works if history cannot be refreshed.
     }
-  }, []);
+  }, [hiddenSegmentJobIds]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -290,6 +309,25 @@ export default function App() {
     setScanProcessStatus({ stage: 'idle', progress: 0 });
     setGreetingIndex((current) => (current + 1) % HOME_GREETINGS.length);
     navigate('home');
+  };
+
+  const clearChatHistory = () => {
+    if (!recentDocuments.length) return;
+
+    const confirmed = window.confirm(
+      'Ukloniti svu historiju iz bočne trake? Dokumenti i rezultati obrade neće biti izbrisani.',
+    );
+    if (!confirmed) return;
+
+    const nextHiddenIds = Array.from(new Set([
+      ...hiddenSegmentJobIds,
+      ...recentDocuments.flatMap((document) => document.segmentJob ? [document.segmentJob.id] : []),
+    ]));
+
+    window.localStorage.setItem(HIDDEN_SEGMENT_HISTORY_STORAGE_KEY, JSON.stringify(nextHiddenIds));
+    setHiddenSegmentJobIds(nextHiddenIds);
+    setRecentDocuments([]);
+    setMobileSidebarOpen(false);
   };
 
   const openUploadedDocuments = (files: File[]) => {
@@ -578,7 +616,22 @@ export default function App() {
           <div className="sidebar__history">
             <div className="sidebar__section-label">
               <span>Nedavno</span>
-              <History size={13} />
+              <span className="sidebar__section-actions">
+                <History size={13} />
+                <Button
+                  className="sidebar-history-clear"
+                  onClick={clearChatHistory}
+                  disabled={!recentDocuments.length || recentDocumentsHaveProcessingJobs || activeUploadIsProcessing}
+                  aria-label="Obriši historiju razgovora"
+                  title={
+                    recentDocumentsHaveProcessingJobs || activeUploadIsProcessing
+                      ? 'Sačekajte da se obrada završi'
+                      : 'Obriši historiju'
+                  }
+                >
+                  <Trash2 size={13} />
+                </Button>
+              </span>
             </div>
             {recentDocuments.map((document) => {
               const isProcessing = isRecentDocumentProcessing(document)

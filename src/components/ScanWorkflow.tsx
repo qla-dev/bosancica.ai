@@ -5,6 +5,8 @@ import {
   OcrJob,
   SegmentJob,
   getSegmentJobDocumentUrl,
+  getSegmentJobLineImageUrl,
+  runAdditionalSegmentation,
   waitForOcrJob,
   waitForSegmentJob,
 } from '../api/ocrJobs';
@@ -12,7 +14,7 @@ import { PRESET_DOCUMENTS } from '../data';
 import { PresetDocument, ScanItem } from '../types';
 import BosancicaHoverText from './BosancicaHoverText';
 import EditableLatinText from './EditableLatinText';
-import { CalendarClock, FileText, CheckCircle2, MapPin, Pencil, RefreshCw, Layers, X } from 'lucide-react';
+import { CalendarClock, FileText, CheckCircle2, MapPin, Pencil, RefreshCw, Layers, Sparkles, X } from 'lucide-react';
 import Button from './ui/Button';
 import PrimaryButton from './ui/PrimaryButton';
 
@@ -137,6 +139,7 @@ const documentWithSegmentLines = (doc: PresetDocument, segment: SegmentJob): Pre
       return {
         textBosančica: `Segment ${index + 1}`,
         textLatinica: `Segment ${index + 1}`,
+        lineImageUrl: segment.id && line.line_image_path ? getSegmentJobLineImageUrl(segment.id, index + 1) : undefined,
         ...box,
       };
     }),
@@ -237,6 +240,9 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [customDocuments, setCustomDocuments] = useState<CustomDocument[]>([]);
   const [apiErrorMessage, setApiErrorMessage] = useState<string | null>(null);
+  const [storedSegmentJob, setStoredSegmentJob] = useState<SegmentJob | null>(initialSegmentJob ?? null);
+  const [isAiCorrecting, setIsAiCorrecting] = useState(false);
+  const [aiCorrectionError, setAiCorrectionError] = useState<string | null>(null);
   const [processedAt] = useState(() => {
     const date = new Date();
     return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
@@ -347,6 +353,8 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       transliterationModel: '',
     });
     setApiErrorMessage(initialSegmentJob.error_message ?? null);
+    setStoredSegmentJob(initialSegmentJob);
+    setAiCorrectionError(null);
     setActiveLine(null);
     onResearcherReviewedChange(false);
   }, [initialSegmentJob?.id]);
@@ -509,6 +517,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         };
 
         updateCustomDocument(item.doc.id, () => segmentedItem);
+        setStoredSegmentJob(completedJob);
         processedDocuments.push(segmentedItem);
         setScanProgress(Math.min(98, Math.round(8 + (((index + 1) / documents.length) * 90))));
       }
@@ -681,6 +690,46 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
       onScanCompleted(newHistoryItem);
 
     });
+  };
+
+  const activeCustomDocument = customDocuments.find((item) => item.doc.id === selectedDoc.id);
+  const activeSegmentJob = activeCustomDocument?.segmentJob
+    ?? (storedSegmentJob && selectedDoc.id === `segment-job-${storedSegmentJob.id}` ? storedSegmentJob : null);
+
+  const startAdditionalSegmentation = async () => {
+    if (!activeSegmentJob || isAiCorrecting || processStage !== 'segmented') return;
+
+    const controller = new AbortController();
+    setIsAiCorrecting(true);
+    setAiCorrectionError(null);
+    setApiErrorMessage(null);
+
+    try {
+      const correctedJob = await runAdditionalSegmentation(activeSegmentJob.id, controller.signal);
+      setStoredSegmentJob(correctedJob);
+
+      if (activeCustomDocument) {
+        const correctedItem = {
+          ...activeCustomDocument,
+          segmentJob: correctedJob,
+          doc: documentFromSegmentJob(activeCustomDocument, correctedJob),
+        };
+        updateCustomDocument(activeCustomDocument.doc.id, () => correctedItem);
+        setSelectedDoc(correctedItem.doc);
+      } else {
+        setSelectedDoc(documentFromStoredSegmentJob(correctedJob));
+      }
+
+      onSegmentHistoryChange?.();
+    } catch (error) {
+      setAiCorrectionError(
+        error instanceof Error
+          ? error.message
+          : 'Dodatna segmentacija nije uspjela. Kraken rezultat je ostao aktivan.',
+      );
+    } finally {
+      setIsAiCorrecting(false);
+    }
   };
 
   useImperativeHandle(ref, () => ({ startSegmentation, startTransliteration }), [
@@ -953,9 +1002,36 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
 
           {showSegmentRows && !isScanning && (
             <div className="flex-grow flex flex-col gap-4">
-              <legend className="text-xs font-serif uppercase tracking-[0.2em] text-[#C5A059]">
-                Segmentacija po redovima
-              </legend>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <legend className="text-xs font-serif uppercase tracking-[0.2em] text-[#C5A059]">
+                  Segmentacija po redovima
+                </legend>
+                {activeSegmentJob && (
+                  <Button
+                    type="button"
+                    onClick={() => void startAdditionalSegmentation()}
+                    disabled={isAiCorrecting}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#5A4A2D] bg-[#211D16] px-3 text-xs text-[#D8B66F] transition hover:border-[#C5A059] disabled:opacity-60"
+                  >
+                    {isAiCorrecting
+                      ? <RefreshCw size={14} className="animate-spin" />
+                      : <Sparkles size={14} />}
+                    {isAiCorrecting ? 'AI upoređuje segmente...' : 'Dodatna segmentacija'}
+                  </Button>
+                )}
+              </div>
+
+              {activeSegmentJob?.ai_corrected_segments && (
+                <p className="rounded-lg border border-emerald-900/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-400">
+                  Prikazana je AI-korigovana segmentacija. Izvorni Kraken rezultat je sačuvan.
+                </p>
+              )}
+
+              {aiCorrectionError && (
+                <p className="rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+                  {aiCorrectionError}
+                </p>
+              )}
 
               <div className="flex flex-col gap-3">
                 {selectedDoc.lines.map((line, idx) => (
@@ -984,6 +1060,13 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
                         <span className="text-[8px] text-stone-500 font-serif uppercase tracking-widest">
                           Kraken segment
                         </span>
+                        {line.lineImageUrl && (
+                          <img
+                            src={line.lineImageUrl}
+                            alt={`Segmentirani red ${idx + 1}`}
+                            className="max-h-24 w-full rounded border border-[#2A2A2A] bg-[#F5E9BF] object-contain"
+                          />
+                        )}
                         <strong className="text-sm text-stone-200 font-serif">{line.textBosančica}</strong>
                       </div>
                       <div className="flex flex-col gap-1.5 bg-[#1A1A1A]/30 p-2.5 rounded-lg border border-[#2A2A2A]">

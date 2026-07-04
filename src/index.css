@@ -270,6 +270,12 @@ button:disabled { cursor: not-allowed; }
 
 .sidebar__history { min-height: 0; margin-top: 24px; overflow-y: auto; }
 .sidebar__section-label { padding: 0 11px 8px; display: flex; align-items: center; justify-content: space-between; color: #67645e; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; }
+.sidebar__section-actions { display: flex; align-items: center; gap: 5px; }
+.sidebar__history .sidebar-history-clear {
+  width: 24px; height: 24px; padding: 0; justify-content: center; border-radius: 7px; color: #66625c;
+}
+.sidebar__history .sidebar-history-clear:hover:not(:disabled) { color: #d98273; background: rgba(127,42,32,.18); }
+.sidebar__history .sidebar-history-clear:disabled { color: #3f3d39; background: transparent; cursor: not-allowed; }
 .sidebar__history button { height: 36px; color: #8c8982; font-size: 12px; }
 .sidebar__history button span { overflow: hidden; text-overflow: ellipsis; }
 .sidebar__history .sidebar-history-item { position: relative; }

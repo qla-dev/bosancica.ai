@@ -74,6 +74,10 @@ export default defineConfig(() => {
           target: backendApiUrl,
           changeOrigin: true,
         },
+        '/api/settings': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
       },
     },
     preview: {
@@ -83,6 +87,10 @@ export default defineConfig(() => {
           changeOrigin: true,
         },
         '/api/ocr': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+        '/api/settings': {
           target: backendApiUrl,
           changeOrigin: true,
         },

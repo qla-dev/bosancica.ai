@@ -27,6 +27,7 @@ export interface PresetDocument {
     width?: number; // percentage width
     top: number; // percentage from top
     height: number; // percentage height
+    lineImageUrl?: string;
   }[];
 }
 
