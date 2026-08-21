@@ -4,6 +4,7 @@ import {
   createSegmentJob,
   OcrJob,
   SegmentJob,
+  SegmentLine,
   getSegmentJobDocumentUrl,
   getSegmentJobLineImageUrl,
   runAdditionalSegmentation,
@@ -89,6 +90,36 @@ const clampLineBox = (
   };
 };
 
+const lineBoxFromSegment = (
+  line: SegmentLine,
+  segment: SegmentJob,
+  fallbackTop: number,
+  fallbackHeight: number,
+) => {
+  const responseMetadata = segment.kraken_response?.metadata;
+  const width = segment.output_metadata?.width ?? responseMetadata?.width;
+  const height = segment.output_metadata?.height ?? responseMetadata?.height;
+  const imageWidth = typeof width === 'number' && width > 0 ? width : null;
+  const imageHeight = typeof height === 'number' && height > 0 ? height : null;
+  const bbox = Array.isArray(line.bbox) && line.bbox.length === 4
+    && line.bbox.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate))
+    ? line.bbox as number[]
+    : null;
+
+  if (imageWidth && imageHeight && bbox) {
+    const [left, top, right, bottom] = bbox;
+
+    return clampLineBox({
+      left: (left / imageWidth) * 100,
+      top: (top / imageHeight) * 100,
+      width: ((right - left) / imageWidth) * 100,
+      height: ((bottom - top) / imageHeight) * 100,
+    }, fallbackTop, fallbackHeight);
+  }
+
+  return clampLineBox(line, fallbackTop, fallbackHeight);
+};
+
 const normalizeOcrLineText = (line: unknown) => {
   if (typeof line === 'string') return line.trim();
   if (line && typeof line === 'object' && 'text' in line) {
@@ -134,7 +165,7 @@ const documentWithSegmentLines = (doc: PresetDocument, segment: SegmentJob): Pre
     rawBosančicaText: summary,
     latinText: summary,
     lines: safeLines.map((line, index) => {
-      const box = clampLineBox(line, 12 + (index * fallbackStep), fallbackHeight);
+      const box = lineBoxFromSegment(line, segment, 12 + (index * fallbackStep), fallbackHeight);
 
       return {
         textBosančica: `Segment ${index + 1}`,
@@ -575,6 +606,7 @@ const ScanWorkflow = forwardRef<ScanWorkflowHandle, ScanWorkflowProps>(function 
         const createdJob = await createOcrJob({
           file: item.file,
           documentName: item.doc.title,
+          modelId,
           modelName,
           signal: controller.signal,
         });

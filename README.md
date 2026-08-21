@@ -6,6 +6,10 @@
 
 This contains everything you need to run your app locally.
 
+## UI languages and themes
+
+The interface supports Bosnian (`bs`) and English (`en`) plus dark and light themes. Bosnian is the source language for UI copy. Whenever user-facing frontend text is added or changed, add its English case to `src/i18n.ts`; document and transcription content must remain untranslated. New colors must also be checked in both `data-theme="dark"` and `data-theme="light"`—avoid introducing a dark-only hard-coded surface without a light-theme counterpart.
+
 View your app in AI Studio: https://ai.studio/apps/895c7394-7595-4784-ab25-2114d91c8f5a
 
 ## Run Locally

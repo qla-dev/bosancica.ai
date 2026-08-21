@@ -1,6 +1,13 @@
 export type OcrJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'model_missing' | string;
 export type SegmentJobStatus = 'pending' | 'running' | 'segmented' | 'failed' | string;
 
+export interface OcrModelOption {
+  id: string;
+  label: string;
+  description: string;
+  badge?: string;
+}
+
 export type OcrJobLine = {
   index?: number;
   text?: string | null;
@@ -81,21 +88,38 @@ interface SegmentJobsResponse {
   data: SegmentJob[];
 }
 
+interface OcrModelsResponse {
+  data: OcrModelOption[];
+}
+
 interface CreateOcrJobOptions {
   file: File;
   documentName?: string;
+  modelId?: string;
   modelName?: string;
   signal?: AbortSignal;
 }
 
 type CreateSegmentJobOptions = CreateOcrJobOptions & {
-  modelId?: string;
   clientRequestId?: string;
 };
 
 const apiHeaders = {
   Accept: 'application/json',
 };
+
+class OcrApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'OcrApiError';
+  }
+}
+
+const transientApiStatuses = new Set([429, 502, 503, 504]);
+
+const isTransientApiError = (error: unknown): error is OcrApiError => (
+  error instanceof OcrApiError && transientApiStatuses.has(error.status)
+);
 
 const parseApiError = async (response: Response) => {
   try {
@@ -130,7 +154,7 @@ const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   });
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response));
+    throw new OcrApiError(await parseApiError(response), response.status);
   }
 
   return response.json() as Promise<T>;
@@ -139,12 +163,14 @@ const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
 export const createOcrJob = async ({
   file,
   documentName,
+  modelId,
   modelName,
   signal,
 }: CreateOcrJobOptions) => {
   const body = new FormData();
   body.append('document', file);
   if (documentName?.trim()) body.append('document_name', documentName.trim());
+  if (modelId?.trim()) body.append('model_id', modelId.trim());
   if (modelName?.trim()) body.append('model_name', modelName.trim());
 
   const payload = await requestJson<OcrJobResponse>('/api/ocr/jobs', {
@@ -153,6 +179,11 @@ export const createOcrJob = async ({
     signal,
   });
 
+  return payload.data;
+};
+
+export const listOcrModels = async (signal?: AbortSignal) => {
+  const payload = await requestJson<OcrModelsResponse>('/api/ocr/models', { signal });
   return payload.data;
 };
 
@@ -248,11 +279,26 @@ export const waitForOcrJob = async (
   signal?: AbortSignal,
   onUpdate?: (job: OcrJob) => void,
 ) => {
-  while (true) {
-    const job = await getOcrJob(jobId, signal);
-    onUpdate?.(job);
+  let transientFailures = 0;
+  const startedAt = Date.now();
+  const maximumWaitMs = 16 * 60 * 1000;
 
-    if (isOcrJobTerminal(job)) return job;
+  while (true) {
+    if (Date.now() - startedAt >= maximumWaitMs) {
+      throw new Error('Obrada je prekoračila 16 minuta. Provjerite queue worker i pokušajte ponovo.');
+    }
+    try {
+      const job = await getOcrJob(jobId, signal);
+      transientFailures = 0;
+      onUpdate?.(job);
+
+      if (isOcrJobTerminal(job)) return job;
+    } catch (error) {
+      if (!isTransientApiError(error) || transientFailures >= 5) throw error;
+      transientFailures += 1;
+      await sleep(Math.min(8000, 750 * (2 ** (transientFailures - 1))), signal);
+      continue;
+    }
 
     await sleep(1500, signal);
   }
@@ -263,11 +309,26 @@ export const waitForSegmentJob = async (
   signal?: AbortSignal,
   onUpdate?: (job: SegmentJob) => void,
 ) => {
-  while (true) {
-    const job = await getSegmentJob(jobId, signal);
-    onUpdate?.(job);
+  let transientFailures = 0;
+  const startedAt = Date.now();
+  const maximumWaitMs = 16 * 60 * 1000;
 
-    if (isSegmentJobTerminal(job)) return job;
+  while (true) {
+    if (Date.now() - startedAt >= maximumWaitMs) {
+      throw new Error('Segmentacija je prekoračila 16 minuta. Provjerite queue worker i pokušajte ponovo.');
+    }
+    try {
+      const job = await getSegmentJob(jobId, signal);
+      transientFailures = 0;
+      onUpdate?.(job);
+
+      if (isSegmentJobTerminal(job)) return job;
+    } catch (error) {
+      if (!isTransientApiError(error) || transientFailures >= 5) throw error;
+      transientFailures += 1;
+      await sleep(Math.min(8000, 750 * (2 ** (transientFailures - 1))), signal);
+      continue;
+    }
 
     await sleep(1500, signal);
   }

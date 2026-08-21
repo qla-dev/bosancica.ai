@@ -36,6 +36,8 @@ const FALLBACK_SETTINGS: SegmentationRepairSettings = {
   merge_max_height_ratio: 2.15,
 };
 
+const SHOW_MODEL_TRAINING_PANEL = false;
+
 type CollapsibleGroupProps = {
   title: string;
   description: string;
@@ -542,37 +544,39 @@ export default function TrainerDashboard() {
         </div>
       </CollapsibleGroup>
 
-      <CollapsibleGroup
-        title="Pogon za treniranje neuralnog modela"
-        description="Konzola za fino podešavanje OCR modela nad validiranim uzorcima."
-        icon={<Terminal className="h-5 w-5" />}
-      >
-        <div className="flex items-center justify-end pb-4">
-          <PrimaryButton onClick={startMockTraining} disabled={isTraining} className="px-4 py-2">
-            <Play className="h-3.5 w-3.5 fill-current" />
-            <span>{isTraining ? 'Fino učenje...' : 'Treniraj model'}</span>
-          </PrimaryButton>
-        </div>
-        <div className="max-h-72 min-h-48 overflow-y-auto rounded-xl border border-[#2A2A2A] bg-black p-4 font-mono text-xs shadow-inner">
-          {trainingLogs.map((log, index) => (
-            <div
-              key={`${index}-${log}`}
-              className={`py-0.5 ${
-                log.startsWith('[EPOCH')
-                  ? 'text-[#C5A059]'
-                  : log.startsWith('[TRENING') || log.startsWith('[KRAKEN-ENG')
-                    ? 'font-bold text-emerald-400'
-                    : 'text-stone-400'
-              }`}
-            >
-              {log}
-            </div>
-          ))}
-          {isTraining && (
-            <div className="mt-1 animate-pulse text-[#C5A059]">▹ Optimizacija matrica u toku...</div>
-          )}
-        </div>
-      </CollapsibleGroup>
+      {SHOW_MODEL_TRAINING_PANEL && (
+        <CollapsibleGroup
+          title="Pogon za treniranje neuralnog modela"
+          description="Konzola za fino podešavanje OCR modela nad validiranim uzorcima."
+          icon={<Terminal className="h-5 w-5" />}
+        >
+          <div className="flex items-center justify-end pb-4">
+            <PrimaryButton onClick={startMockTraining} disabled={isTraining} className="px-4 py-2">
+              <Play className="h-3.5 w-3.5 fill-current" />
+              <span>{isTraining ? 'Fino učenje...' : 'Treniraj model'}</span>
+            </PrimaryButton>
+          </div>
+          <div className="max-h-72 min-h-48 overflow-y-auto rounded-xl border border-[#2A2A2A] bg-black p-4 font-mono text-xs shadow-inner">
+            {trainingLogs.map((log, index) => (
+              <div
+                key={`${index}-${log}`}
+                className={`py-0.5 ${
+                  log.startsWith('[EPOCH')
+                    ? 'text-[#C5A059]'
+                    : log.startsWith('[TRENING') || log.startsWith('[KRAKEN-ENG')
+                      ? 'font-bold text-emerald-400'
+                      : 'text-stone-400'
+                }`}
+              >
+                {log}
+              </div>
+            ))}
+            {isTraining && (
+              <div className="mt-1 animate-pulse text-[#C5A059]">▹ Optimizacija matrica u toku...</div>
+            )}
+          </div>
+        </CollapsibleGroup>
+      )}
     </div>
   );
 }

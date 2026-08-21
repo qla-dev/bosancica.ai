@@ -11,22 +11,26 @@ import {
   Images,
   MessageSquareText,
   Languages,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   ScanLine,
   Settings,
   ShieldCheck,
+  Sun,
   Trash2,
   Upload,
   UserRound,
+  X,
 } from 'lucide-react';
 import { MOCK_HISTORY } from './data';
 import { ScanItem } from './types';
 import ScanWorkflow, { type ScanProcessStatus, type ScanWorkflowHandle } from './components/ScanWorkflow';
-import LetterArchive from './components/LetterArchive';
-import TrainerDashboard from './components/TrainerDashboard';
-import { listSegmentJobs, type SegmentJob } from './api/ocrJobs';
+import LetterTrainerWorkspace from './components/LetterTrainerWorkspace';
+import SettingsWorkspace from './components/SettingsWorkspace';
+import { translateUiText, type AppLanguage, type AppTheme, useUiLocalization } from './i18n';
+import { listOcrModels, listSegmentJobs, type OcrModelOption, type SegmentJob } from './api/ocrJobs';
 import Button from './components/ui/Button';
 import IconButton from './components/ui/IconButton';
 import PrimaryButton from './components/ui/PrimaryButton';
@@ -45,16 +49,11 @@ type RecentDocument = {
 const workspaceMeta: Record<Workspace, { label: string; eyebrow: string }> = {
   home: { label: 'Novi dokument', eyebrow: 'Bosančica AI' },
   scanner: { label: 'Skeniranje i transliteracija', eyebrow: 'OCR laboratorija' },
-  archive: { label: 'AI trainer slova', eyebrow: 'Digitalna zbirka' },
+  archive: { label: 'AI trener', eyebrow: 'Digitalna zbirka' },
   trainer: { label: 'Postavke', eyebrow: 'Konfiguracija modela' },
 };
 
-const modelOptions: Array<{
-  id: string;
-  label: string;
-  description: string;
-  badge?: string;
-}> = [
+const DEFAULT_MODEL_OPTIONS: OcrModelOption[] = [
   {
     id: 'kraken-bvision-local',
     label: 'Kraken BVision OCR',
@@ -92,6 +91,23 @@ const LOGIN_CREDENTIALS = {
 const AUTH_SESSION_STORAGE_KEY = 'bosancica.auth-session';
 const AUTH_SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const HIDDEN_SEGMENT_HISTORY_STORAGE_KEY = 'bosancica.hidden-segment-history';
+const APP_PREFERENCES_STORAGE_KEY = 'bosancica.app-preferences';
+
+const readAppPreferences = (): { language: AppLanguage; theme: AppTheme } => {
+  if (typeof window === 'undefined') return { language: 'bs', theme: 'dark' };
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(APP_PREFERENCES_STORAGE_KEY) ?? '{}') as {
+      language?: AppLanguage;
+      theme?: AppTheme;
+    };
+    return {
+      language: saved.language === 'en' ? 'en' : 'bs',
+      theme: saved.theme === 'light' ? 'light' : 'dark',
+    };
+  } catch {
+    return { language: 'bs', theme: 'dark' };
+  }
+};
 
 const readAuthSessionExpiration = () => {
   if (typeof window === 'undefined') return null;
@@ -169,7 +185,9 @@ const isRecentDocumentProcessing = (document: RecentDocument) => (
 );
 
 export default function App() {
-  const gpuInfo = useGpuInfo();
+  const [appPreferences, setAppPreferences] = useState(readAppPreferences);
+  useUiLocalization(appPreferences.language);
+  const t = (value: string) => translateUiText(value, appPreferences.language);
   const [authSessionExpiresAt, setAuthSessionExpiresAt] = useState<number | null>(readAuthSessionExpiration);
   const isAuthenticated = authSessionExpiresAt !== null;
   const [loginUsername, setLoginUsername] = useState('');
@@ -177,7 +195,9 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [greetingIndex, setGreetingIndex] = useState(() => Math.floor(Math.random() * HOME_GREETINGS.length));
   const [workspace, setWorkspace] = useState<Workspace>('home');
-  const [selectedModel, setSelectedModel] = useState(modelOptions[0].id);
+  const [modelOptions, setModelOptions] = useState<OcrModelOption[]>(DEFAULT_MODEL_OPTIONS);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_OPTIONS[0].id);
+  const gpuInfo = useGpuInfo(selectedModel);
   const [pendingUploads, setPendingUploads] = useState<File[]>([]);
   const [pendingUploadBatchId, setPendingUploadBatchId] = useState<string | null>(null);
   const [documentName, setDocumentName] = useState('');
@@ -193,6 +213,7 @@ export default function App() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   const [hiddenSegmentJobIds, setHiddenSegmentJobIds] = useState<number[]>(readHiddenSegmentHistory);
@@ -207,6 +228,42 @@ export default function App() {
   const mainShellRef = useRef<HTMLElement>(null);
   const dragDepthRef = useRef(0);
   const scanWorkflowRef = useRef<ScanWorkflowHandle>(null);
+  const hiddenSegmentJobIdsRef = useRef(new Set(hiddenSegmentJobIds));
+  const segmentHistoryRefreshInFlightRef = useRef<Promise<void> | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = appPreferences.theme;
+    document.documentElement.lang = appPreferences.language;
+    window.localStorage.setItem(APP_PREFERENCES_STORAGE_KEY, JSON.stringify(appPreferences));
+  }, [appPreferences]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const refreshModelOptions = () => {
+      void listOcrModels(controller.signal)
+        .then((availableModels) => {
+          setModelOptions((currentModels) => {
+            const merged = new Map(DEFAULT_MODEL_OPTIONS.map((model) => [model.id, model]));
+            currentModels.forEach((model) => merged.set(model.id, model));
+            availableModels.forEach((model) => merged.set(model.id, model));
+            return Array.from(merged.values());
+          });
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === 'AbortError') return;
+          console.warn('Could not load OCR model catalog; using known models.', error);
+        });
+    };
+
+    refreshModelOptions();
+    const catalogRefreshTimer = window.setInterval(refreshModelOptions, 30_000);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(catalogRefreshTimer);
+    };
+  }, []);
 
   useEffect(() => {
     if (authSessionExpiresAt === null) return;
@@ -226,27 +283,42 @@ export default function App() {
     return () => window.clearTimeout(expirationTimer);
   }, [authSessionExpiresAt]);
 
-  const refreshSegmentHistory = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const jobs = await listSegmentJobs(signal);
-      const hiddenIds = new Set(hiddenSegmentJobIds);
-      const persistedDocuments = jobs
-        .filter((job) => !hiddenIds.has(job.id))
-        .map(recentDocumentFromSegmentJob);
-
-      setRecentDocuments((current) => {
-        const persistedTitles = new Set(persistedDocuments.map((document) => document.title));
-        const activeUploads = current.filter((document) => (
-          document.files?.length
-          && !document.segmentJob
-          && !persistedTitles.has(document.title)
-        ));
-        return [...activeUploads, ...persistedDocuments].slice(0, 20);
-      });
-    } catch {
-      // The scanner still works if history cannot be refreshed.
+  const refreshSegmentHistory = useCallback((signal?: AbortSignal) => {
+    if (segmentHistoryRefreshInFlightRef.current) {
+      return segmentHistoryRefreshInFlightRef.current;
     }
-  }, [hiddenSegmentJobIds]);
+
+    const refreshRequest = (async () => {
+      try {
+        const jobs = await listSegmentJobs(signal);
+        const hiddenIds = hiddenSegmentJobIdsRef.current;
+        const persistedDocuments = jobs
+          .filter((job) => !hiddenIds.has(job.id))
+          .map(recentDocumentFromSegmentJob);
+
+        setRecentDocuments((current) => {
+          const persistedTitles = new Set(persistedDocuments.map((document) => document.title));
+          const activeUploads = current.filter((document) => (
+            document.files?.length
+            && !document.segmentJob
+            && !persistedTitles.has(document.title)
+          ));
+          return [...activeUploads, ...persistedDocuments].slice(0, 20);
+        });
+      } catch {
+        // The scanner still works if history cannot be refreshed.
+      }
+    })();
+
+    segmentHistoryRefreshInFlightRef.current = refreshRequest;
+    void refreshRequest.finally(() => {
+      if (segmentHistoryRefreshInFlightRef.current === refreshRequest) {
+        segmentHistoryRefreshInFlightRef.current = null;
+      }
+    });
+
+    return refreshRequest;
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -324,10 +396,12 @@ export default function App() {
       ...recentDocuments.flatMap((document) => document.segmentJob ? [document.segmentJob.id] : []),
     ]));
 
+    hiddenSegmentJobIdsRef.current = new Set(nextHiddenIds);
     window.localStorage.setItem(HIDDEN_SEGMENT_HISTORY_STORAGE_KEY, JSON.stringify(nextHiddenIds));
     setHiddenSegmentJobIds(nextHiddenIds);
     setRecentDocuments([]);
-    setMobileSidebarOpen(false);
+    setDocumentSelectionNonce((value) => value + 1);
+    startNewConversation();
   };
 
   const openUploadedDocuments = (files: File[]) => {
@@ -579,18 +653,75 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {projectModalOpen && (
+          <motion.div
+            className="project-modal"
+            role="presentation"
+            onMouseDown={() => setProjectModalOpen(false)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.section
+              className="project-modal__dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="project-modal-title"
+              onMouseDown={(event) => event.stopPropagation()}
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="project-modal__header">
+                <div>
+                  <span>Digitalna kulturna baština</span>
+                  <h2 id="project-modal-title">O projektu Bosančica AI</h2>
+                </div>
+                <Button type="button" onClick={() => setProjectModalOpen(false)} aria-label="Zatvori prozor">
+                  <X size={16} />
+                </Button>
+              </div>
+
+              <div className="project-modal__content">
+                <p>
+                  Bosančica AI je istraživački digitalni alat namijenjen očuvanju, proučavanju i
+                  lakšem čitanju historijskih dokumenata pisanih bosančicom.
+                </p>
+                <p>
+                  Projekt povezuje obradu slike, segmentaciju rukopisnih redova i modele optičkog
+                  prepoznavanja znakova kako bi izvorni zapis pretvorio u čitljivu latinicu, uz
+                  mogućnost stručnog pregleda i ispravke rezultata.
+                </p>
+                <p>
+                  Cilj projekta je približiti vrijednu pisanu baštinu Bosne i Hercegovine
+                  istraživačima, studentima i široj javnosti, te podržati njeno dugoročno digitalno
+                  očuvanje. Automatski rezultati služe kao pomoć u istraživanju i trebaju se
+                  provjeriti prema izvornom dokumentu.
+                </p>
+              </div>
+
+              <div className="project-modal__actions">
+                <Button type="button" onClick={() => setProjectModalOpen(false)}>Zatvori</Button>
+              </div>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <aside
         className={`sidebar ${sidebarCollapsed ? 'sidebar--collapsed' : ''} ${
           mobileSidebarOpen ? 'sidebar--mobile-open' : ''
         }`}
       >
         <div className="sidebar__top">
-          <Button className="brand" onClick={startNewConversation} aria-label="Bosančica AI početna">
+          <Button className="brand" onClick={startNewConversation} aria-label={t('Bosančica AI početna')}>
             <span className="brand__mark">Б</span>
             {!sidebarCollapsed && (
               <span className="brand__copy">
                 <strong>bosančica.ai</strong>
-                <small>digitalna baština</small>
+                <small>{t('digitalna baština')}</small>
               </span>
             )}
           </Button>
@@ -598,15 +729,15 @@ export default function App() {
 
         <PrimaryButton className="new-chat-button" onClick={startNewConversation}>
           <Plus size={18} />
-          {!sidebarCollapsed && <span>Novi dokument</span>}
+          {!sidebarCollapsed && <span>{t('Novi dokument')}</span>}
         </PrimaryButton>
 
-        <nav className="sidebar__nav" aria-label="Glavna navigacija">
+        <nav className="sidebar__nav" aria-label={t('Glavna navigacija')}>
           <Button className={workspace === 'archive' ? 'is-active' : ''} onClick={() => navigate('archive')}>
             <Bot size={19} />
             {!sidebarCollapsed && (
               <>
-                <span>AI trainer slova</span>
+                <span>{t('AI trener')}</span>
               </>
             )}
           </Button>
@@ -615,18 +746,18 @@ export default function App() {
         {!sidebarCollapsed && (
           <div className="sidebar__history">
             <div className="sidebar__section-label">
-              <span>Nedavno</span>
+              <span>{t('Nedavno')}</span>
               <span className="sidebar__section-actions">
                 <History size={13} />
                 <Button
                   className="sidebar-history-clear"
                   onClick={clearChatHistory}
                   disabled={!recentDocuments.length || recentDocumentsHaveProcessingJobs || activeUploadIsProcessing}
-                  aria-label="Obriši historiju razgovora"
+                  aria-label={t('Obriši historiju razgovora')}
                   title={
                     recentDocumentsHaveProcessingJobs || activeUploadIsProcessing
-                      ? 'Sačekajte da se obrada završi'
-                      : 'Obriši historiju'
+                      ? t('Sačekajte da se obrada završi')
+                      : t('Obriši historiju')
                   }
                 >
                   <Trash2 size={13} />
@@ -649,7 +780,7 @@ export default function App() {
                     <i
                       className="sidebar-history-item__spinner"
                       role="status"
-                      aria-label="Obrada u toku"
+                      aria-label={t('Obrada u toku')}
                     />
                   )}
                 </Button>
@@ -673,9 +804,16 @@ export default function App() {
                     navigate('trainer');
                   }}
                 >
-                  <Settings size={16} /> Postavke
+                  <Settings size={16} /> {t('Postavke')}
                 </Button>
-                <Button><BookOpen size={16} /> O projektu</Button>
+                <Button
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    setProjectModalOpen(true);
+                  }}
+                >
+                  <BookOpen size={16} /> {t('O projektu')}
+                </Button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -683,8 +821,8 @@ export default function App() {
             <span className="profile-button__avatar"><UserRound size={17} /></span>
             {!sidebarCollapsed && (
               <span className="profile-button__copy">
-                <strong>Istraživač</strong>
-                <small>Radni prostor BiH</small>
+                <strong>{t('Istraživač')}</strong>
+                <small>{t('Radni prostor BiH')}</small>
               </span>
             )}
             {!sidebarCollapsed && <ChevronDown size={15} />}
@@ -697,7 +835,7 @@ export default function App() {
           <IconButton
             className="icon-button"
             onClick={toggleSidebar}
-            aria-label="Prikaži ili sakrij navigaciju"
+            aria-label={t('Prikaži ili sakrij navigaciju')}
           >
             <span className="hidden lg:grid place-items-center">
               {sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
@@ -706,22 +844,45 @@ export default function App() {
           </IconButton>
 
           <div className="topbar__title">
-            <span>{workspaceMeta[workspace].eyebrow}</span>
-            <strong>{workspaceMeta[workspace].label}</strong>
+            <span>{t(workspaceMeta[workspace].eyebrow)}</span>
+            <strong>{t(workspaceMeta[workspace].label)}</strong>
+          </div>
+
+          <div className="topbar__preferences">
+            <IconButton
+              className="topbar__preference-button"
+              onClick={() => setAppPreferences((current) => ({
+                ...current,
+                theme: current.theme === 'dark' ? 'light' : 'dark',
+              }))}
+              aria-label={t(appPreferences.theme === 'dark' ? 'Uključi svijetlu temu' : 'Uključi tamnu temu')}
+              data-bs-toggle="tooltip"
+              data-bs-placement="bottom"
+              data-bs-title={t(appPreferences.theme === 'dark' ? 'Svijetla tema' : 'Tamna tema')}
+            >
+              {appPreferences.theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </IconButton>
+            <IconButton
+              className="topbar__preference-button topbar__language-button"
+              onClick={() => setAppPreferences((current) => ({
+                ...current,
+                language: current.language === 'bs' ? 'en' : 'bs',
+              }))}
+              aria-label={appPreferences.language === 'bs' ? 'Switch to English' : 'Prebaci na bosanski'}
+              data-bs-toggle="tooltip"
+              data-bs-placement="bottom"
+              data-bs-title={appPreferences.language === 'bs' ? 'English' : 'Bosanski'}
+            >
+              <Languages size={17} />
+              <small>{appPreferences.language.toUpperCase()}</small>
+            </IconButton>
           </div>
 
           <div className="topbar__gpu">
             <i />
             <div>
-              <small>
-                {gpuInfo.status === 'detected' ? (
-                  <>GPU spreman na <span className="topbar__server-name">qla.dev</span> serveru</>
-                ) : gpuInfo.statusLabel}
-              </small>
-              <strong>
-                {gpuInfo.name}
-                {gpuInfo.memoryMb && gpuInfo.memoryMb > 0 ? ` · ${(gpuInfo.memoryMb / 1024).toFixed(1)} GB VRAM` : ''}
-              </strong>
+              <small>{gpuInfo.statusLabel}</small>
+              <strong>{gpuInfo.name}</strong>
             </div>
             <div className="mini-meter" aria-label={gpuInfo.statusLabel}>
               <span /><span /><span /><span />
@@ -749,7 +910,7 @@ export default function App() {
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.22 }}
                   >
-                    {HOME_GREETINGS[greetingIndex]}
+                    {t(HOME_GREETINGS[greetingIndex])}
                   </motion.h1>
                 </AnimatePresence>
                 <div
@@ -787,7 +948,7 @@ export default function App() {
                     <Button
                       className="home-composer__attach"
                       onClick={() => setUploadMenuOpen((value) => !value)}
-                      aria-label="Odaberi način dodavanja dokumenta"
+                      aria-label={t('Odaberi način dodavanja dokumenta')}
                       aria-expanded={uploadMenuOpen}
                     >
                       <Plus size={25} />
@@ -802,18 +963,18 @@ export default function App() {
                           exit={{ opacity: 0, y: 8, scale: .98 }}
                           transition={{ duration: .16 }}
                         >
-                          <span className="upload-source-menu__label">Dodaj izvor</span>
+                          <span className="upload-source-menu__label">{t('Dodaj izvor')}</span>
                           <Button onClick={() => { setUploadMenuOpen(false); singleImageInputRef.current?.click(); }}>
                             <span className="upload-source-menu__icon"><ImageIcon size={18} /></span>
-                            <span><strong>Dodaj jednu sliku</strong><small>Jedna stranica ili natpis</small><em>PNG · JPG · WEBP</em></span>
+                            <span><strong>{t('Dodaj jednu sliku')}</strong><small>{t('Jedna stranica ili natpis')}</small><em>PNG · JPG · WEBP</em></span>
                           </Button>
                           <Button onClick={() => { setUploadMenuOpen(false); multiImageInputRef.current?.click(); }}>
                             <span className="upload-source-menu__icon"><Images size={18} /></span>
-                            <span><strong>Dodaj više slika</strong><small>Batch stranica istog dokumenta</small><em>PNG · JPG · WEBP</em></span>
+                            <span><strong>{t('Dodaj više slika')}</strong><small>{t('Batch stranica istog dokumenta')}</small><em>PNG · JPG · WEBP</em></span>
                           </Button>
                           <Button onClick={() => { setUploadMenuOpen(false); documentInputRef.current?.click(); }}>
                             <span className="upload-source-menu__icon"><FileText size={18} /></span>
-                            <span><strong>Dodaj dokument</strong><small>Učitaj digitalni dokument</small><em>PDF</em></span>
+                            <span><strong>{t('Dodaj dokument')}</strong><small>{t('Učitaj digitalni dokument')}</small><em>PDF</em></span>
                           </Button>
                         </motion.div>
                       )}
@@ -822,9 +983,9 @@ export default function App() {
                   <input
                     value={documentName}
                     onChange={(event) => setDocumentName(event.target.value)}
-                    placeholder="Upišite ime dokumenta…"
+                    placeholder={t('Upišite ime dokumenta…')}
                     maxLength={80}
-                    aria-label="Ime dokumenta"
+                    aria-label={t('Ime dokumenta')}
                     className="home-composer__input"
                   />
 
@@ -838,7 +999,7 @@ export default function App() {
                             exit={{ opacity: 0, y: 8, scale: 0.98 }}
                             transition={{ duration: 0.16 }}
                           >
-                            <span className="mode-menu__label">Odaberite model</span>
+                            <span className="mode-menu__label">{t('Odaberite model')}</span>
                             {modelOptions.map((option) => (
                               <Button
                                 type="button"
@@ -873,7 +1034,7 @@ export default function App() {
 
                 </div>
 
-                <p className="upload-home__note"><ShieldCheck size={13} /> Dokument se obrađuje sigurno i ne pohranjuje bez vaše dozvole.</p>
+                <p className="upload-home__note"><ShieldCheck size={13} /> {t('Dokument se obrađuje sigurno i ne pohranjuje bez vaše dozvole.')}</p>
               </motion.section>
             ) : (
               <motion.section
@@ -953,7 +1114,7 @@ export default function App() {
                             {scanProcessStatus.stage === 'segmenting'
                               ? `U toku ${scanProcessStatus.progress}%`
                               : segmentationFailed
-                                ? 'Greska - pokusaj ponovo'
+                                ? 'Greška – pokušaj ponovo'
                                 : segmentationComplete
                                 ? `Gotova · ${scanProcessStatus.segmentationModel || activeModel.label}`
                                 : 'Pokreni segmentaciju'}
@@ -1014,10 +1175,15 @@ export default function App() {
                   </>
                 )}
                 {workspace === 'archive' && (
-                  <LetterArchive />
+                  <LetterTrainerWorkspace />
                 )}
                 {workspace === 'trainer' && (
-                  <TrainerDashboard />
+                  <SettingsWorkspace
+                    language={appPreferences.language}
+                    theme={appPreferences.theme}
+                    onLanguageChange={(language) => setAppPreferences((current) => ({ ...current, language }))}
+                    onThemeChange={(theme) => setAppPreferences((current) => ({ ...current, theme }))}
+                  />
                 )}
               </motion.section>
             )}

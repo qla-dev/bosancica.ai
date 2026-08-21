@@ -1,48 +1,75 @@
 import { useEffect, useState } from 'react';
 
-export type GpuDetectionStatus = 'detecting' | 'detected' | 'unavailable';
+export type RuntimeDetectionStatus = 'detecting' | 'detected' | 'unavailable';
+
+type ModelRuntime = {
+  id: string;
+  label: string;
+  available: boolean;
+  device?: string | null;
+  device_type?: 'gpu' | 'cpu' | null;
+  gpu_name?: string | null;
+};
 
 export interface GpuInfo {
   name: string;
-  memoryMb?: number;
-  status: GpuDetectionStatus;
+  status: RuntimeDetectionStatus;
   statusLabel: string;
+  deviceType?: 'gpu' | 'cpu';
 }
 
-export default function useGpuInfo() {
+export default function useGpuInfo(selectedModelId: string) {
   const [gpuInfo, setGpuInfo] = useState<GpuInfo>({
-    name: 'Otkrivam grafičku…',
+    name: 'Provjeravam uređaj za modele…',
     status: 'detecting',
-    statusLabel: 'Provjera hardvera',
+    statusLabel: 'Provjera modela',
   });
 
   useEffect(() => {
     const controller = new AbortController();
     const detect = async () => {
       try {
-        const response = await fetch('/api/system/gpu', { signal: controller.signal });
-        if (!response.ok) throw new Error('Local GPU endpoint unavailable');
-        const localGpu = await response.json() as { name?: string; memoryMb?: number };
-        if (!localGpu.name) throw new Error('GPU name unavailable');
+        const response = await fetch('/api/system/runtime', { signal: controller.signal });
+        if (!response.ok) throw new Error('Model runtime endpoint unavailable');
+
+        const payload = await response.json() as { models?: ModelRuntime[] };
+        const models = payload.models ?? [];
+        const selected = models.find((model) => model.id === selectedModelId);
+        if (!selected?.available || !selected.device_type) throw new Error('Selected model service unavailable');
+
+        const count = models.filter((model) => (
+          model.available && model.device_type === selected.device_type
+        )).length;
+        const hardware = selected.device_type === 'gpu'
+          ? (selected.gpu_name || selected.device || 'GPU')
+          : 'CPU (GPU nije dostupna)';
+
         setGpuInfo({
-          name: localGpu.name,
-          memoryMb: localGpu.memoryMb,
+          name: `${selected.label} · ${hardware}`,
           status: 'detected',
-          statusLabel: 'GPU spreman',
+          statusLabel: selected.device_type === 'gpu'
+            ? `${count} modela koriste GPU`
+            : `${count} modela koriste CPU fallback`,
+          deviceType: selected.device_type,
         });
       } catch {
         if (!controller.signal.aborted) {
           setGpuInfo({
-            name: 'Server GPU nije dostupna',
+            name: 'Uređaj modela trenutno nije dostupan',
             status: 'unavailable',
-            statusLabel: 'Server GPU nije dostupna',
+            statusLabel: 'Servis modela nije dostupan',
           });
         }
       }
     };
+
     void detect();
-    return () => controller.abort();
-  }, []);
+    const timer = window.setInterval(detect, 15_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [selectedModelId]);
 
   return gpuInfo;
 }
