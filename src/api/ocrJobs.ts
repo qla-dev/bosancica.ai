@@ -1,5 +1,5 @@
-export type OcrJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'model_missing' | string;
-export type SegmentJobStatus = 'pending' | 'running' | 'segmented' | 'failed' | string;
+export type OcrJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'model_missing' | string;
+export type SegmentJobStatus = 'pending' | 'running' | 'segmented' | 'failed' | 'cancelled' | string;
 
 export interface OcrModelOption {
   id: string;
@@ -24,6 +24,18 @@ export interface OcrJob {
   confidence?: number | null;
   duration_ms?: number | null;
   error_message?: string | null;
+  segment_job_id?: number | null;
+  normalization?: NormalizationResult | null;
+}
+
+export interface NormalizationResult {
+  modern_bosnian: string;
+  paragraphs: string[];
+  summary: string;
+  document_type: string;
+  uncertainties: string[];
+  model: string;
+  duration_ms: number;
 }
 
 export type SegmentLine = {
@@ -74,7 +86,12 @@ export interface SegmentJob {
   kraken_response?: SegmentResponse | null;
   openrouter_segments?: Record<string, unknown> | null;
   ai_corrected_segments?: Record<string, unknown> | null;
+  ocr_job?: OcrJob | null;
 }
+
+export type BookDocument = SegmentJob & {
+  book_source: 'segment' | 'ocr';
+};
 
 interface OcrJobResponse {
   data: OcrJob;
@@ -88,12 +105,21 @@ interface SegmentJobsResponse {
   data: SegmentJob[];
 }
 
+interface BookDocumentsResponse {
+  data: BookDocument[];
+}
+
 interface OcrModelsResponse {
   data: OcrModelOption[];
 }
 
+interface NormalizationResponse {
+  data: NormalizationResult;
+}
+
 interface CreateOcrJobOptions {
-  file: File;
+  file?: File;
+  segmentJobId?: number;
   documentName?: string;
   modelId?: string;
   modelName?: string;
@@ -162,13 +188,15 @@ const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
 
 export const createOcrJob = async ({
   file,
+  segmentJobId,
   documentName,
   modelId,
   modelName,
   signal,
 }: CreateOcrJobOptions) => {
   const body = new FormData();
-  body.append('document', file);
+  if (file) body.append('document', file);
+  if (segmentJobId) body.append('segment_job_id', String(segmentJobId));
   if (documentName?.trim()) body.append('document_name', documentName.trim());
   if (modelId?.trim()) body.append('model_id', modelId.trim());
   if (modelName?.trim()) body.append('model_name', modelName.trim());
@@ -176,6 +204,17 @@ export const createOcrJob = async ({
   const payload = await requestJson<OcrJobResponse>('/api/ocr/jobs', {
     method: 'POST',
     body,
+    signal,
+  });
+
+  return payload.data;
+};
+
+export const normalizeModernBosnian = async (text: string, ocrJobId?: number, signal?: AbortSignal) => {
+  const payload = await requestJson<NormalizationResponse>('/api/normalizations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, ...(ocrJobId ? { ocr_job_id: ocrJobId } : {}) }),
     signal,
   });
 
@@ -212,12 +251,29 @@ export const createSegmentJob = async ({
 };
 
 export const listSegmentJobs = async (signal?: AbortSignal) => {
-  const payload = await requestJson<SegmentJobsResponse>('/api/ocr/segments', { signal });
+  const payload = await requestJson<SegmentJobsResponse>('/api/ocr/segments', { signal, cache: 'no-store' });
   return payload.data;
 };
 
+export const listBookDocuments = async (signal?: AbortSignal) => {
+  const payload = await requestJson<BookDocumentsResponse>('/api/ocr/segments/books', { signal, cache: 'no-store' });
+  return payload.data;
+};
+
+export const getOcrJobDocumentUrl = (jobId: number) => `/api/ocr/jobs/${jobId}/document`;
+
 export const getOcrJob = async (jobId: number, signal?: AbortSignal) => {
   const payload = await requestJson<OcrJobResponse>(`/api/ocr/jobs/${jobId}`, { signal });
+  return payload.data;
+};
+
+export const retryOcrJob = async (jobId: number, signal?: AbortSignal) => {
+  const payload = await requestJson<OcrJobResponse>(`/api/ocr/jobs/${jobId}/retry`, { method: 'POST', signal });
+  return payload.data;
+};
+
+export const cancelOcrJob = async (jobId: number) => {
+  const payload = await requestJson<OcrJobResponse>(`/api/ocr/jobs/${jobId}/cancel`, { method: 'POST' });
   return payload.data;
 };
 
@@ -225,10 +281,30 @@ export const isOcrJobTerminal = (job: OcrJob) => (
   job.status === 'completed'
   || job.status === 'failed'
   || job.status === 'model_missing'
+  || job.status === 'cancelled'
 );
 
 export const getSegmentJob = async (jobId: number, signal?: AbortSignal) => {
   const payload = await requestJson<SegmentJobResponse>(`/api/ocr/segments/${jobId}`, { signal });
+  return payload.data;
+};
+
+export const deleteSegmentJob = async (jobId: number) => {
+  await requestJson<{ deleted: boolean }>(`/api/ocr/segments/${jobId}`, { method: 'DELETE' });
+};
+
+export const retrySegmentJob = async (jobId: number, options?: { modelId?: string; modelName?: string; signal?: AbortSignal }) => {
+  const payload = await requestJson<SegmentJobResponse>(`/api/ocr/segments/${jobId}/retry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_id: options?.modelId, model_name: options?.modelName }),
+    signal: options?.signal,
+  });
+  return payload.data;
+};
+
+export const cancelSegmentJob = async (jobId: number) => {
+  const payload = await requestJson<SegmentJobResponse>(`/api/ocr/segments/${jobId}/cancel`, { method: 'POST' });
   return payload.data;
 };
 
@@ -250,6 +326,7 @@ export const runAdditionalSegmentation = async (jobId: number, signal?: AbortSig
 export const isSegmentJobTerminal = (job: SegmentJob) => (
   job.status === 'segmented'
   || job.status === 'failed'
+  || job.status === 'cancelled'
 );
 
 const sleep = (milliseconds: number, signal?: AbortSignal) => (

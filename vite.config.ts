@@ -82,6 +82,14 @@ export default defineConfig(() => {
           target: backendApiUrl,
           changeOrigin: true,
         },
+        '/api/researcher-corrections': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+        '/api/normalizations': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
       },
     },
     preview: {
@@ -99,6 +107,14 @@ export default defineConfig(() => {
           changeOrigin: true,
         },
         '/api/training': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+        '/api/researcher-corrections': {
+          target: backendApiUrl,
+          changeOrigin: true,
+        },
+        '/api/normalizations': {
           target: backendApiUrl,
           changeOrigin: true,
         },

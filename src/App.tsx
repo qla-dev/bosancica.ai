@@ -1,10 +1,15 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { createPortal } from 'react-dom';
 import {
+  Archive,
   BookOpen,
   Bot,
+  ChevronUp,
   Check,
   ChevronDown,
+  Download,
+  EllipsisVertical,
   FileText,
   History,
   Image as ImageIcon,
@@ -18,6 +23,7 @@ import {
   ScanLine,
   Settings,
   ShieldCheck,
+  Sparkles,
   Sun,
   Trash2,
   Upload,
@@ -27,16 +33,18 @@ import {
 import { MOCK_HISTORY } from './data';
 import { ScanItem } from './types';
 import ScanWorkflow, { type ScanProcessStatus, type ScanWorkflowHandle } from './components/ScanWorkflow';
+import LetterArchive from './components/LetterArchive';
 import LetterTrainerWorkspace from './components/LetterTrainerWorkspace';
 import SettingsWorkspace from './components/SettingsWorkspace';
+import BookWorkspace from './components/BookWorkspace';
 import { translateUiText, type AppLanguage, type AppTheme, useUiLocalization } from './i18n';
-import { listOcrModels, listSegmentJobs, type OcrModelOption, type SegmentJob } from './api/ocrJobs';
+import { deleteSegmentJob, getSegmentJobDocumentUrl, listBookDocuments, listOcrModels, listSegmentJobs, type BookDocument, type OcrModelOption, type SegmentJob } from './api/ocrJobs';
 import Button from './components/ui/Button';
 import IconButton from './components/ui/IconButton';
 import PrimaryButton from './components/ui/PrimaryButton';
 import useGpuInfo from './hooks/useGpuInfo';
 
-type Workspace = 'home' | 'scanner' | 'archive' | 'trainer';
+type Workspace = 'home' | 'scanner' | 'archive' | 'letters' | 'book' | 'trainer';
 type RecentDocument = {
   id: string;
   title: string;
@@ -50,6 +58,8 @@ const workspaceMeta: Record<Workspace, { label: string; eyebrow: string }> = {
   home: { label: 'Novi dokument', eyebrow: 'Bosančica AI' },
   scanner: { label: 'Skeniranje i transliteracija', eyebrow: 'OCR laboratorija' },
   archive: { label: 'AI trener', eyebrow: 'Digitalna zbirka' },
+  letters: { label: 'Arhiva slova', eyebrow: 'Digitalna zbirka' },
+  book: { label: 'Digitalna knjiga', eyebrow: 'Digitalna zbirka' },
   trainer: { label: 'Postavke', eyebrow: 'Konfiguracija modela' },
 };
 
@@ -67,6 +77,20 @@ const DEFAULT_MODEL_OPTIONS: OcrModelOption[] = [
     badge: 'AKTIVNO',
   },
 ];
+
+const orderModelOptions = (models: OcrModelOption[]) => [...models].sort((left, right) => {
+  const leftRecommended = left.badge === 'PREPORUČENO';
+  const rightRecommended = right.badge === 'PREPORUČENO';
+
+  if (leftRecommended !== rightRecommended) return leftRecommended ? -1 : 1;
+  return left.label.localeCompare(right.label);
+});
+
+const localizeModelBadge = (badge: string, language: AppLanguage) => (
+  language === 'en' && badge === 'PREPORUČENO' ? 'RECOMMENDED' : badge
+);
+
+const shouldShowModelBadge = (badge?: string) => badge && badge !== 'AKTIVNO';
 
 const HOME_GREETINGS = [
   'Zdravo, istraživaču. Koji dokument čitamo?',
@@ -91,21 +115,34 @@ const LOGIN_CREDENTIALS = {
 const AUTH_SESSION_STORAGE_KEY = 'bosancica.auth-session';
 const AUTH_SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const HIDDEN_SEGMENT_HISTORY_STORAGE_KEY = 'bosancica.hidden-segment-history';
+const RECENT_HISTORY_WINDOW_STORAGE_KEY = 'bosancica.recent-history-window';
 const APP_PREFERENCES_STORAGE_KEY = 'bosancica.app-preferences';
 
-const readAppPreferences = (): { language: AppLanguage; theme: AppTheme } => {
-  if (typeof window === 'undefined') return { language: 'bs', theme: 'dark' };
+type RecentHistoryWindow = { ids: number[]; highWatermark: number };
+
+type AppPreferences = {
+  language: AppLanguage;
+  theme: AppTheme;
+  disabledModelIds: string[];
+};
+
+const readAppPreferences = (): AppPreferences => {
+  if (typeof window === 'undefined') return { language: 'bs', theme: 'dark', disabledModelIds: [] };
   try {
     const saved = JSON.parse(window.localStorage.getItem(APP_PREFERENCES_STORAGE_KEY) ?? '{}') as {
       language?: AppLanguage;
       theme?: AppTheme;
+      disabledModelIds?: unknown;
     };
     return {
       language: saved.language === 'en' ? 'en' : 'bs',
       theme: saved.theme === 'light' ? 'light' : 'dark',
+      disabledModelIds: Array.isArray(saved.disabledModelIds)
+        ? saved.disabledModelIds.filter((id): id is string => typeof id === 'string')
+        : [],
     };
   } catch {
-    return { language: 'bs', theme: 'dark' };
+    return { language: 'bs', theme: 'dark', disabledModelIds: [] };
   }
 };
 
@@ -146,6 +183,20 @@ const readHiddenSegmentHistory = () => {
   }
 };
 
+const readRecentHistoryWindow = (): RecentHistoryWindow | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const value = JSON.parse(window.localStorage.getItem(RECENT_HISTORY_WINDOW_STORAGE_KEY) ?? 'null') as Partial<RecentHistoryWindow> | null;
+    if (!value || !Array.isArray(value.ids) || !Number.isInteger(value.highWatermark)) return null;
+    return {
+      ids: value.ids.filter((id): id is number => Number.isInteger(id) && id > 0),
+      highWatermark: Math.max(0, value.highWatermark ?? 0),
+    };
+  } catch {
+    return null;
+  }
+};
+
 const recentDocumentFromSegmentJob = (job: SegmentJob): RecentDocument => ({
   id: `segment-${job.id}`,
   title: job.document_name || job.original_filename || `Dokument #${job.id}`,
@@ -153,6 +204,15 @@ const recentDocumentFromSegmentJob = (job: SegmentJob): RecentDocument => ({
 });
 
 const processStatusFromSegmentJob = (job: SegmentJob): ScanProcessStatus => {
+  if (job.ocr_job?.status === 'completed') {
+    return {
+      stage: 'complete',
+      progress: 100,
+      segmentationModel: job.model_name ?? undefined,
+      transliterationModel: job.ocr_job.model_name ?? undefined,
+    };
+  }
+
   if (job.status === 'segmented') {
     return {
       stage: 'segmented',
@@ -169,6 +229,15 @@ const processStatusFromSegmentJob = (job: SegmentJob): ScanProcessStatus => {
     };
   }
 
+  if (job.status === 'cancelled' || job.ocr_job?.status === 'cancelled') {
+    return {
+      stage: 'cancelled',
+      progress: 0,
+      segmentationModel: job.model_name ?? undefined,
+      transliterationModel: job.ocr_job?.model_name ?? undefined,
+    };
+  }
+
   if (job.status === 'pending' || job.status === 'running') {
     return {
       stage: 'segmenting',
@@ -181,7 +250,10 @@ const processStatusFromSegmentJob = (job: SegmentJob): ScanProcessStatus => {
 };
 
 const isRecentDocumentProcessing = (document: RecentDocument) => (
-  document.segmentJob?.status === 'pending' || document.segmentJob?.status === 'running'
+  document.segmentJob?.status === 'pending'
+  || document.segmentJob?.status === 'running'
+  || document.segmentJob?.ocr_job?.status === 'pending'
+  || document.segmentJob?.ocr_job?.status === 'running'
 );
 
 export default function App() {
@@ -206,9 +278,12 @@ export default function App() {
   const [documentFocusMode, setDocumentFocusMode] = useState(false);
   const [researcherReviewed, setResearcherReviewed] = useState(false);
   const [reviewAvailable, setReviewAvailable] = useState(true);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [scanProcessStatus, setScanProcessStatus] = useState<ScanProcessStatus>({ stage: 'idle', progress: 0 });
+  const [segmentProgressByJobId, setSegmentProgressByJobId] = useState<Record<number, number>>({});
   const [isDragging, setIsDragging] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [transcriptionControlsCollapsed, setTranscriptionControlsCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
@@ -216,7 +291,13 @@ export default function App() {
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [scansHistory, setScansHistory] = useState<ScanItem[]>(MOCK_HISTORY);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
+  const [bookDocuments, setBookDocuments] = useState<BookDocument[]>([]);
+  const [bookLoading, setBookLoading] = useState(false);
   const [hiddenSegmentJobIds, setHiddenSegmentJobIds] = useState<number[]>(readHiddenSegmentHistory);
+  const [historyMenuDocumentId, setHistoryMenuDocumentId] = useState<string | null>(null);
+  const [historyMenuPosition, setHistoryMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
   const [selectedSegmentJob, setSelectedSegmentJob] = useState<SegmentJob | null>(null);
   const recentDocumentsHaveProcessingJobs = recentDocuments.some(isRecentDocumentProcessing);
   const modeMenuRef = useRef<HTMLDivElement>(null);
@@ -229,7 +310,18 @@ export default function App() {
   const dragDepthRef = useRef(0);
   const scanWorkflowRef = useRef<ScanWorkflowHandle>(null);
   const hiddenSegmentJobIdsRef = useRef(new Set(hiddenSegmentJobIds));
+  const recentHistoryWindowRef = useRef<RecentHistoryWindow | null>(readRecentHistoryWindow());
   const segmentHistoryRefreshInFlightRef = useRef<Promise<void> | null>(null);
+
+  const handleProcessStatusChange = useCallback((status: ScanProcessStatus) => {
+    setScanProcessStatus(status);
+    if (status.jobId && ['segmenting', 'transliterating', 'normalizing'].includes(status.stage)) {
+      setSegmentProgressByJobId((current) => ({
+        ...current,
+        [status.jobId as number]: Math.max(current[status.jobId as number] ?? 0, status.progress),
+      }));
+    }
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = appPreferences.theme;
@@ -238,17 +330,47 @@ export default function App() {
   }, [appPreferences]);
 
   useEffect(() => {
+    const updateScrollControls = () => {
+      const scrollTop = window.scrollY;
+      const documentHeight = document.documentElement.scrollHeight;
+      const viewportHeight = window.innerHeight;
+
+      setCanScrollUp(scrollTop > 160);
+      setCanScrollDown(scrollTop + viewportHeight < documentHeight - 8);
+    };
+
+    updateScrollControls();
+    window.addEventListener('scroll', updateScrollControls, { passive: true });
+    window.addEventListener('resize', updateScrollControls);
+    return () => {
+      window.removeEventListener('scroll', updateScrollControls);
+      window.removeEventListener('resize', updateScrollControls);
+    };
+  }, [workspace, documentSelectionNonce]);
+
+  const visibleModelOptions = modelOptions.filter(
+    (option) => !appPreferences.disabledModelIds.includes(option.id),
+  );
+
+  useEffect(() => {
+    setSelectedModel((currentModel) => (
+      visibleModelOptions.some((option) => option.id === currentModel)
+        ? currentModel
+        : visibleModelOptions[0]?.id ?? ''
+    ));
+  }, [visibleModelOptions]);
+
+  useEffect(() => {
     const controller = new AbortController();
 
     const refreshModelOptions = () => {
       void listOcrModels(controller.signal)
         .then((availableModels) => {
-          setModelOptions((currentModels) => {
-            const merged = new Map(DEFAULT_MODEL_OPTIONS.map((model) => [model.id, model]));
-            currentModels.forEach((model) => merged.set(model.id, model));
-            availableModels.forEach((model) => merged.set(model.id, model));
-            return Array.from(merged.values());
-          });
+          const merged = new Map(DEFAULT_MODEL_OPTIONS.map((model) => [model.id, model]));
+          availableModels.forEach((model) => merged.set(model.id, model));
+          const nextModels = orderModelOptions(Array.from(merged.values()));
+
+          setModelOptions(nextModels);
         })
         .catch((error) => {
           if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -292,8 +414,31 @@ export default function App() {
       try {
         const jobs = await listSegmentJobs(signal);
         const hiddenIds = hiddenSegmentJobIdsRef.current;
-        const persistedDocuments = jobs
-          .filter((job) => !hiddenIds.has(job.id))
+        const availableJobs = jobs.filter((job) => !hiddenIds.has(job.id));
+        const storedWindow = recentHistoryWindowRef.current;
+        const nextWindow = storedWindow === null
+          ? {
+              ids: availableJobs.slice(0, 20).map((job) => job.id),
+              highWatermark: Math.max(0, ...jobs.map((job) => job.id)),
+            }
+          : (() => {
+              const availableIds = new Set(availableJobs.map((job) => job.id));
+              const newlyCreatedIds = availableJobs
+                .filter((job) => job.id > storedWindow.highWatermark)
+                .map((job) => job.id);
+              return {
+                ids: Array.from(new Set([
+                  ...newlyCreatedIds,
+                  ...storedWindow.ids.filter((id) => availableIds.has(id)),
+                ])).slice(0, 20),
+                highWatermark: Math.max(storedWindow.highWatermark, 0, ...jobs.map((job) => job.id)),
+              };
+            })();
+        recentHistoryWindowRef.current = nextWindow;
+        window.localStorage.setItem(RECENT_HISTORY_WINDOW_STORAGE_KEY, JSON.stringify(nextWindow));
+        const visibleWindowIds = new Set(nextWindow.ids);
+        const persistedDocuments = availableJobs
+          .filter((job) => visibleWindowIds.has(job.id))
           .map(recentDocumentFromSegmentJob);
 
         setRecentDocuments((current) => {
@@ -305,6 +450,9 @@ export default function App() {
           ));
           return [...activeUploads, ...persistedDocuments].slice(0, 20);
         });
+        setSelectedSegmentJob((current) => current
+          ? jobs.find((job) => job.id === current.id) ?? current
+          : null);
       } catch {
         // The scanner still works if history cannot be refreshed.
       }
@@ -323,21 +471,58 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    const controller = new AbortController();
-    void refreshSegmentHistory(controller.signal);
-
-    return () => controller.abort();
-  }, [isAuthenticated, refreshSegmentHistory]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !recentDocumentsHaveProcessingJobs) return;
-
+    // Do not abort this first request during React's development remount cycle:
+    // the next mount would otherwise reuse the aborted in-flight promise and
+    // leave the sidebar empty until the interval fires.
+    void refreshSegmentHistory();
     const historyRefreshTimer = window.setInterval(() => {
       void refreshSegmentHistory();
-    }, 2500);
+    }, recentDocumentsHaveProcessingJobs ? 1_500 : 15_000);
 
-    return () => window.clearInterval(historyRefreshTimer);
+    return () => {
+      window.clearInterval(historyRefreshTimer);
+    };
   }, [isAuthenticated, recentDocumentsHaveProcessingJobs, refreshSegmentHistory]);
+
+  // Queue work is independent of the currently open document. Keep an
+  // estimated, monotonic progress value for every active history entry so
+  // switching documents never freezes its indicator or resets it on return.
+  useEffect(() => {
+    const activeJobs = recentDocuments
+      .map((document) => document.segmentJob)
+      .filter((job): job is SegmentJob => Boolean(job) && (
+        job.status === 'pending'
+        || job.status === 'running'
+        || job.ocr_job?.status === 'pending'
+        || job.ocr_job?.status === 'running'
+      ));
+
+    if (!activeJobs.length) return;
+
+    setSegmentProgressByJobId((current) => {
+      const next = { ...current };
+      activeJobs.forEach((job) => {
+        const floor = job.ocr_job?.status === 'pending' || job.ocr_job?.status === 'running'
+          ? 55
+          : job.status === 'running' ? 12 : 8;
+        next[job.id] = Math.max(next[job.id] ?? 0, floor);
+      });
+      return next;
+    });
+
+    const progressTimer = window.setInterval(() => {
+      setSegmentProgressByJobId((current) => {
+        const next = { ...current };
+        activeJobs.forEach((job) => {
+          const currentValue = next[job.id] ?? 0;
+          next[job.id] = Math.min(90, Math.max(currentValue, 8) + 1);
+        });
+        return next;
+      });
+    }, 1_000);
+
+    return () => window.clearInterval(progressTimer);
+  }, [recentDocuments]);
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {
@@ -345,9 +530,22 @@ export default function App() {
       if (!modeMenuRef.current?.contains(target)) setModeMenuOpen(false);
       if (!uploadMenuRef.current?.contains(target)) setUploadMenuOpen(false);
       if (!profileMenuRef.current?.contains(target)) setProfileMenuOpen(false);
+      if (!(target instanceof Element) || !target.closest('.sidebar-history-menu, .sidebar-history-more')) {
+        setHistoryMenuDocumentId(null);
+      }
     };
     document.addEventListener('mousedown', closeMenus);
     return () => document.removeEventListener('mousedown', closeMenus);
+  }, []);
+
+  useEffect(() => {
+    const closeHistoryMenu = () => setHistoryMenuDocumentId(null);
+    document.addEventListener('scroll', closeHistoryMenu, true);
+    window.addEventListener('resize', closeHistoryMenu);
+    return () => {
+      document.removeEventListener('scroll', closeHistoryMenu, true);
+      window.removeEventListener('resize', closeHistoryMenu);
+    };
   }, []);
 
   useEffect(() => {
@@ -360,6 +558,16 @@ export default function App() {
     setMobileSidebarOpen(false);
     setModeMenuOpen(false);
   };
+
+  useEffect(() => {
+    if (workspace !== 'book') return;
+    const controller = new AbortController();
+    setBookLoading(true);
+    void listBookDocuments(controller.signal)
+      .then((documents) => setBookDocuments(documents.filter((document) => document.ocr_job?.normalization != null)))
+      .finally(() => setBookLoading(false));
+    return () => controller.abort();
+  }, [workspace]);
 
   const toggleSidebar = () => {
     if (window.matchMedia('(min-width: 1024px)').matches) {
@@ -402,6 +610,61 @@ export default function App() {
     setRecentDocuments([]);
     setDocumentSelectionNonce((value) => value + 1);
     startNewConversation();
+  };
+
+  const removeHistoryDocument = async (document: RecentDocument) => {
+    if (document.segmentJob) {
+      await deleteSegmentJob(document.segmentJob.id);
+      const currentWindow = recentHistoryWindowRef.current;
+      if (currentWindow) {
+        const nextWindow = {
+          ...currentWindow,
+          ids: currentWindow.ids.filter((id) => id !== document.segmentJob?.id),
+        };
+        recentHistoryWindowRef.current = nextWindow;
+        window.localStorage.setItem(RECENT_HISTORY_WINDOW_STORAGE_KEY, JSON.stringify(nextWindow));
+      }
+    }
+
+    setHistoryMenuDocumentId(null);
+    setRecentDocuments((current) => current.filter((item) => item.id !== document.id));
+
+    if (selectedSegmentJob?.id === document.segmentJob?.id || document.uploadBatchId === pendingUploadBatchId) {
+      startNewConversation();
+    }
+  };
+
+  const downloadHistoryDocument = async (document: RecentDocument) => {
+    setHistoryMenuDocumentId(null);
+
+    if (document.segmentJob) {
+      const response = await fetch(getSegmentJobDocumentUrl(document.segmentJob.id), { cache: 'no-store' });
+      if (!response.ok) return;
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('content-disposition') ?? '';
+      const filename = contentDisposition.match(/filename="?([^";]+)"?/i)?.[1] ?? document.title;
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.style.display = 'none';
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      return;
+    }
+
+    const file = document.files?.[0];
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const openUploadedDocuments = (files: File[]) => {
@@ -486,7 +749,7 @@ export default function App() {
 
   const openRecentDocument = (document: RecentDocument) => {
     const nextModelId = document.segmentJob?.model_id;
-    if (nextModelId && modelOptions.some((option) => option.id === nextModelId)) {
+    if (nextModelId && visibleModelOptions.some((option) => option.id === nextModelId)) {
       setSelectedModel(nextModelId);
     }
 
@@ -505,16 +768,21 @@ export default function App() {
         : { stage: 'complete', progress: 100 });
     setDocumentSelectionNonce((value) => value + 1);
     navigate('scanner');
+    if (document.segmentJob) void refreshSegmentHistory();
   };
 
-  const activeModel = modelOptions.find((option) => option.id === selectedModel) ?? modelOptions[0];
-  const averageAccuracy = scansHistory.length
-    ? scansHistory.reduce((sum, scan) => sum + scan.accuracy, 0) / scansHistory.length
-    : 0;
+  // A saved preference can hide every model (including after the local catalog
+  // changes). Keep a display fallback so the shell never crashes before the
+  // user can re-enable a model in Settings.
+  const activeModel = visibleModelOptions.find((option) => option.id === selectedModel)
+    ?? visibleModelOptions[0]
+    ?? modelOptions[0]
+    ?? DEFAULT_MODEL_OPTIONS[0];
   const segmentationComplete = ['segmented', 'transliterating', 'complete'].includes(scanProcessStatus.stage);
-  const transliterationComplete = scanProcessStatus.stage === 'complete';
+  const transliterationComplete = scanProcessStatus.stage === 'complete' || scanProcessStatus.stage === 'normalizing';
+  const normalizationComplete = scanProcessStatus.normalizationStatus === 'completed';
   const segmentationFailed = scanProcessStatus.stage === 'failed';
-  const activeUploadIsProcessing = ['segmenting', 'transliterating'].includes(scanProcessStatus.stage);
+  const activeUploadIsProcessing = ['segmenting', 'transliterating', 'normalizing'].includes(scanProcessStatus.stage);
 
   const isRecentDocumentActiveUpload = (document: RecentDocument) => {
     const files = document.files;
@@ -741,6 +1009,14 @@ export default function App() {
               </>
             )}
           </Button>
+          <Button className={workspace === 'letters' ? 'is-active' : ''} onClick={() => navigate('letters')}>
+            <Archive size={19} />
+            {!sidebarCollapsed && <span>{t('Arhiva slova')}</span>}
+          </Button>
+          <Button className={workspace === 'book' ? 'is-active' : ''} onClick={() => navigate('book')}>
+            <BookOpen size={19} />
+            {!sidebarCollapsed && <span>{t('Digitalna zbirka')}</span>}
+          </Button>
         </nav>
 
         {!sidebarCollapsed && (
@@ -767,23 +1043,68 @@ export default function App() {
             {recentDocuments.map((document) => {
               const isProcessing = isRecentDocumentProcessing(document)
                 || (activeUploadIsProcessing && isRecentDocumentActiveUpload(document));
+              const hasFailed = ['failed', 'cancelled'].includes(document.segmentJob?.status ?? '')
+                || ['failed', 'cancelled'].includes(document.segmentJob?.ocr_job?.status ?? '');
+              const isSelected = (selectedSegmentJob !== null && document.segmentJob?.id === selectedSegmentJob.id)
+                || (pendingUploadBatchId !== null
+                  && (document.uploadBatchId === pendingUploadBatchId || document.id === pendingUploadBatchId));
 
               return (
-                <Button
+                <div
                   key={document.id}
-                  className={`sidebar-history-item${isProcessing ? ' is-processing' : ''}`}
-                  onClick={() => openRecentDocument(document)}
+                  className={`sidebar-history-row${isProcessing ? ' is-processing' : ''}${hasFailed ? ' is-failed' : ''}${isSelected ? ' is-selected' : ''}`}
                 >
-                  <MessageSquareText size={15} />
-                  <span>{document.title}</span>
-                  {isProcessing && (
-                    <i
-                      className="sidebar-history-item__spinner"
-                      role="status"
-                      aria-label={t('Obrada u toku')}
-                    />
+                  <Button
+                    className="sidebar-history-item"
+                    onClick={() => openRecentDocument(document)}
+                    aria-current={isSelected ? 'page' : undefined}
+                  >
+                    <MessageSquareText size={15} />
+                    <span>{document.title}</span>
+                    {isProcessing && (
+                      <i
+                        className="sidebar-history-item__spinner"
+                        role="status"
+                        aria-label={t('Obrada u toku')}
+                      />
+                    )}
+                  </Button>
+                  <Button
+                    className="sidebar-history-more"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (historyMenuDocumentId === document.id) {
+                        setHistoryMenuDocumentId(null);
+                        return;
+                      }
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const menuHeight = 76;
+                      const top = window.innerHeight - rect.bottom >= menuHeight + 8
+                        ? rect.bottom + 4
+                        : Math.max(8, rect.top - menuHeight - 4);
+                      setHistoryMenuPosition({
+                        top,
+                        right: Math.max(8, window.innerWidth - rect.right),
+                      });
+                      setHistoryMenuDocumentId(document.id);
+                    }}
+                    aria-label={t('Opcije dokumenta')}
+                    title={t('Opcije dokumenta')}
+                  >
+                    <EllipsisVertical size={16} />
+                  </Button>
+                  {historyMenuDocumentId === document.id && historyMenuPosition && createPortal(
+                    <div className="sidebar-history-menu" style={historyMenuPosition}>
+                      <Button onClick={() => downloadHistoryDocument(document)}>
+                        <Download size={14} /> {t('Preuzmi')}
+                      </Button>
+                      <Button className="is-danger" onClick={() => void removeHistoryDocument(document)}>
+                        <Trash2 size={14} /> {t('Ukloni')}
+                      </Button>
+                    </div>,
+                    window.document.body,
                   )}
-                </Button>
+                </div>
               );
             })}
           </div>
@@ -890,7 +1211,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className={workspace === 'home' ? 'main-content main-content--home' : 'main-content'}>
+        <main className={workspace === 'home' ? 'main-content main-content--home' : workspace === 'book' ? 'main-content main-content--book' : 'main-content'}>
           <AnimatePresence mode="wait">
             {workspace === 'home' ? (
               <motion.section
@@ -1000,24 +1321,26 @@ export default function App() {
                             transition={{ duration: 0.16 }}
                           >
                             <span className="mode-menu__label">{t('Odaberite model')}</span>
-                            {modelOptions.map((option) => (
-                              <Button
-                                type="button"
-                                key={option.id}
-                                className={selectedModel === option.id ? 'is-selected' : ''}
-                                onClick={() => {
-                                  setSelectedModel(option.id);
-                                  setModeMenuOpen(false);
-                                }}
-                              >
-                                <span className="mode-menu__icon"><Bot size={18} /></span>
-                                <span>
-                                  <strong>{option.label}{option.badge && <em>{option.badge}</em>}</strong>
-                                  <small>{option.description}</small>
-                                </span>
-                                {selectedModel === option.id && <Check size={16} />}
-                              </Button>
-                            ))}
+                            <div className="model-menu__options">
+                              {visibleModelOptions.map((option) => (
+                                <Button
+                                  type="button"
+                                  key={option.id}
+                                  className={selectedModel === option.id ? 'is-selected' : ''}
+                                  onClick={() => {
+                                    setSelectedModel(option.id);
+                                    setModeMenuOpen(false);
+                                  }}
+                                >
+                                  <span className="mode-menu__icon"><Bot size={18} /></span>
+                                  <span>
+                                  <strong>{option.label}{shouldShowModelBadge(option.badge) && <> <em>{localizeModelBadge(option.badge!, appPreferences.language)}</em></>}</strong>
+                                    <small>{option.description}</small>
+                                  </span>
+                                  {selectedModel === option.id && <Check size={16} />}
+                                </Button>
+                              ))}
+                            </div>
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -1047,7 +1370,17 @@ export default function App() {
               >
                 {workspace === 'scanner' && (
                   <>
-                    <div className="transcription-modelbar">
+                    <header className={`transcription-modelbar ${transcriptionControlsCollapsed ? 'is-collapsed' : ''}`} aria-label="Kontrole obrade dokumenta">
+                      <Button
+                        type="button"
+                        className="transcription-modelbar__collapse"
+                        aria-label={t(transcriptionControlsCollapsed ? 'Prikaži kontrole obrade' : 'Sakrij kontrole obrade')}
+                        title={t(transcriptionControlsCollapsed ? 'Prikaži kontrole obrade' : 'Sakrij kontrole obrade')}
+                        aria-expanded={!transcriptionControlsCollapsed}
+                        onClick={() => setTranscriptionControlsCollapsed((collapsed) => !collapsed)}
+                      >
+                        <Settings size={18} />
+                      </Button>
                       <div className="mode-picker" ref={modeMenuRef}>
                         <AnimatePresence>
                           {modeMenuOpen && (
@@ -1058,35 +1391,25 @@ export default function App() {
                               exit={{ opacity: 0, y: -6, scale: .98 }}
                             >
                               <span className="mode-menu__label">Dostupni lokalni modeli</span>
-                              {modelOptions.map((option) => (
-                                <Button
-                                  type="button"
-                                  key={option.id}
-                                  className={selectedModel === option.id ? 'is-selected' : ''}
-                                  onClick={() => {
-                                    setSelectedModel(option.id);
-                                    setModeMenuOpen(false);
-                                  }}
-                                >
-                                  <span className="mode-menu__icon"><Bot size={18} /></span>
-                                  <span>
-                                    <strong>{option.label}{option.badge && <em>{option.badge}</em>}</strong>
-                                    <small>{option.description}</small>
-                                  </span>
-                                  {selectedModel === option.id && <Check size={16} />}
-                                </Button>
-                              ))}
-                              <div className="transcription-model-menu__stats" aria-label="Statistika obrade">
-                                <div>
-                                  <small>Odrađeni skenovi</small>
-                                  <strong>{scansHistory.length}</strong>
-                                  <span>Aktivan status</span>
-                                </div>
-                                <div>
-                                  <small>Prosjek pouzdanosti</small>
-                                  <strong>{averageAccuracy.toFixed(1)}%</strong>
-                                  <span>AI model v1.4</span>
-                                </div>
+                              <div className="model-menu__options">
+                                {visibleModelOptions.map((option) => (
+                                  <Button
+                                    type="button"
+                                    key={option.id}
+                                    className={selectedModel === option.id ? 'is-selected' : ''}
+                                    onClick={() => {
+                                      setSelectedModel(option.id);
+                                      setModeMenuOpen(false);
+                                    }}
+                                  >
+                                    <span className="mode-menu__icon"><Bot size={18} /></span>
+                                    <span>
+                                    <strong>{option.label}{shouldShowModelBadge(option.badge) && <> <em>{localizeModelBadge(option.badge!, appPreferences.language)}</em></>}</strong>
+                                      <small>{option.description}</small>
+                                    </span>
+                                    {selectedModel === option.id && <Check size={16} />}
+                                  </Button>
+                                ))}
                               </div>
                             </motion.div>
                           )}
@@ -1103,7 +1426,7 @@ export default function App() {
                       </div>
                       <Button
                         type="button"
-                        disabled={scanProcessStatus.stage !== 'idle' && scanProcessStatus.stage !== 'failed'}
+                        disabled={scanProcessStatus.stage === 'transliterating'}
                         onClick={() => scanWorkflowRef.current?.startSegmentation()}
                         className={`transcription-modelbar__process ${scanProcessStatus.stage === 'segmenting' ? 'is-running' : ''} ${segmentationComplete ? 'is-complete' : ''} ${segmentationFailed ? 'is-failed' : ''}`}
                       >
@@ -1116,16 +1439,20 @@ export default function App() {
                               : segmentationFailed
                                 ? 'Greška – pokušaj ponovo'
                                 : segmentationComplete
-                                ? `Gotova · ${scanProcessStatus.segmentationModel || activeModel.label}`
+                                ? 'Pokreni ponovo segmentaciju'
                                 : 'Pokreni segmentaciju'}
                           </strong>
                         </div>
                       </Button>
                       <Button
                         type="button"
-                        disabled={scanProcessStatus.stage !== 'segmented'}
-                        onClick={() => scanWorkflowRef.current?.startTransliteration()}
-                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'transliterating' ? 'is-running' : ''} ${transliterationComplete ? 'is-complete' : ''}`}
+                        disabled={scanProcessStatus.stage !== 'segmented' && scanProcessStatus.stage !== 'complete' && scanProcessStatus.stage !== 'transliterating'}
+                        onClick={() => (
+                          transliterationComplete
+                            ? scanWorkflowRef.current?.showTransliteration()
+                            : scanWorkflowRef.current?.startTransliteration()
+                        )}
+                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'transliterating' ? 'is-running' : ''} ${transliterationComplete ? 'is-complete' : ''} ${scanProcessStatus.stage === 'segmented' ? 'is-ready' : ''}`}
                       >
                         <Languages size={16} />
                         <div>
@@ -1143,17 +1470,41 @@ export default function App() {
                       </Button>
                       <Button
                         type="button"
-                        disabled={!reviewAvailable}
-                        onClick={() => setResearcherReviewed(true)}
+                        disabled={!transliterationComplete || scanProcessStatus.stage === 'normalizing'}
+                        onClick={() => scanWorkflowRef.current?.startNormalization()}
+                        className={`transcription-modelbar__process ${scanProcessStatus.stage === 'normalizing' ? 'is-running' : ''} ${normalizationComplete ? 'is-complete' : ''} ${transliterationComplete && !normalizationComplete && scanProcessStatus.stage !== 'normalizing' ? 'is-ready' : ''}`}
+                      >
+                        <Sparkles size={16} />
+                        <div>
+                          <small>{t('Normalizacija')}</small>
+                          <strong>
+                            {scanProcessStatus.stage === 'normalizing'
+                              ? 'U toku…'
+                              : normalizationComplete
+                                ? `Gotova · ${scanProcessStatus.normalizationModel || 'Gemini'}`
+                                : transliterationComplete
+                                  ? 'Pretvori u savremeni bosanski'
+                                  : 'Čeka transliteraciju'}
+                          </strong>
+                        </div>
+                      </Button>
+                      <Button
+                        type="button"
+                        disabled={!reviewAvailable || reviewSubmitting}
+                        onClick={() => {
+                          setReviewSubmitting(true);
+                          void scanWorkflowRef.current?.confirmResearcherReview()
+                            .finally(() => setReviewSubmitting(false));
+                        }}
                         className={`transcription-modelbar__review ${researcherReviewed ? 'is-complete' : ''}`}
                       >
                         <ShieldCheck size={16} />
                         <div>
                           <small>Kontrola istraživača</small>
-                          <strong>{researcherReviewed ? 'Kontrola potvrđena' : 'Označi kontrolu'}</strong>
+                          <strong>{reviewSubmitting ? 'Čuvanje korekcija…' : researcherReviewed ? 'Potvrđeno · spremno za trening' : 'Označi kontrolu'}</strong>
                         </div>
                       </Button>
-                    </div>
+                    </header>
                     <ScanWorkflow
                       ref={scanWorkflowRef}
                       key={`scanner-${documentSelectionNonce}`}
@@ -1162,6 +1513,7 @@ export default function App() {
                       initialUploadBatchId={pendingUploadBatchId}
                       initialPresetId={selectedPresetId}
                       initialSegmentJob={selectedSegmentJob}
+                      resumeProgress={selectedSegmentJob ? segmentProgressByJobId[selectedSegmentJob.id] : undefined}
                       initialDocumentName={documentName.trim()}
                       modelId={activeModel.id}
                       modelName={activeModel.label}
@@ -1169,20 +1521,36 @@ export default function App() {
                       researcherReviewed={researcherReviewed}
                       onResearcherReviewedChange={setResearcherReviewed}
                       onReviewAvailabilityChange={setReviewAvailable}
-                      onProcessStatusChange={setScanProcessStatus}
+                      onProcessStatusChange={handleProcessStatusChange}
                       onSegmentHistoryChange={refreshSegmentHistory}
+                      language={appPreferences.language}
                     />
                   </>
                 )}
                 {workspace === 'archive' && (
                   <LetterTrainerWorkspace />
                 )}
+
+                {workspace === 'letters' && (
+                  <LetterArchive />
+                )}
+                {workspace === 'book' && (
+                  <BookWorkspace books={bookDocuments} loading={bookLoading} />
+                )}
                 {workspace === 'trainer' && (
                   <SettingsWorkspace
                     language={appPreferences.language}
                     theme={appPreferences.theme}
+                    models={modelOptions}
+                    disabledModelIds={appPreferences.disabledModelIds}
                     onLanguageChange={(language) => setAppPreferences((current) => ({ ...current, language }))}
                     onThemeChange={(theme) => setAppPreferences((current) => ({ ...current, theme }))}
+                    onModelEnabledChange={(modelId, enabled) => setAppPreferences((current) => ({
+                      ...current,
+                      disabledModelIds: enabled
+                        ? current.disabledModelIds.filter((id) => id !== modelId)
+                        : [...new Set([...current.disabledModelIds, modelId])],
+                    }))}
                   />
                 )}
               </motion.section>
@@ -1190,6 +1558,33 @@ export default function App() {
           </AnimatePresence>
         </main>
       </section>
+
+      {(canScrollUp || canScrollDown) && (
+        <div className="scroll-controls" aria-label="Kontrole pomicanja stranice">
+          {canScrollUp && (
+            <Button
+              type="button"
+              className="scroll-controls__button"
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              aria-label="Idi na vrh stranice"
+              title="Idi na vrh"
+            >
+              <ChevronUp size={20} aria-hidden="true" />
+            </Button>
+          )}
+          {canScrollDown && (
+            <Button
+              type="button"
+              className="scroll-controls__button"
+              onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })}
+              aria-label="Idi na dno stranice"
+              title="Idi na dno"
+            >
+              <ChevronDown size={20} aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
