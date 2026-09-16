@@ -166,19 +166,19 @@ docker push kulasinn/bosancica-ai:bosancica-frontend
 
 ## cPanel frontend redeploy
 
-`redeploy.php` updates the frontend checkout from Git, installs the locked
-dependencies, and rebuilds `dist/` on the cPanel server. It does not deploy or
-restart the backend, queue workers, Docker services, or model services.
-
-The cPanel document root must contain the frontend repository checkout on its
-`main` branch. The account also needs Git, Node.js 20 or newer with npm,
-outbound Git access, and write access to the checkout. Upload `redeploy.php`
-and the root `.htaccess` once, then start a deployment at:
+`redeploy.php` bootstraps a private frontend Git checkout beside the cPanel
+document root, installs the locked dependencies, builds `dist/`, and publishes
+only the static build files. It does not deploy or restart the backend, queue
+workers, Docker services, or model services. Upload `redeploy.php` and the
+root `.htaccess` once, then start a deployment at:
 
 ```text
 https://bosancica.ai/redeploy.php
 ```
 
 The production build always uses `https://api.bosancica.ai:82` as its API origin.
+
+For the complete DNS, Docker, IIS, certificate, router, Firewall and cPanel
+procedure, see [CPANEL_DOCKER_IIS_SETUP.md](docs/CPANEL_DOCKER_IIS_SETUP.md).
 Like the NFFIS endpoint, this URL has no authentication; anyone who knows it
 can trigger a frontend deployment. A lock prevents simultaneous deployments.
