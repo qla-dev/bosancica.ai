@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiUrl } from '../api/client';
 
 export type RuntimeDetectionStatus = 'detecting' | 'detected' | 'unavailable';
 
@@ -29,7 +30,7 @@ export default function useGpuInfo(selectedModelId: string) {
     const controller = new AbortController();
     const detect = async () => {
       try {
-        const response = await fetch('/api/system/runtime', { signal: controller.signal });
+        const response = await fetch(apiUrl('/api/system/runtime'), { signal: controller.signal });
         if (!response.ok) throw new Error('Model runtime endpoint unavailable');
 
         const payload = await response.json() as { models?: ModelRuntime[] };

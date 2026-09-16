@@ -1,0 +1,25 @@
+RewriteEngine On
+
+# Redirect the application and deployment endpoint to HTTPS.
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# The cPanel deployment endpoint is a real PHP file, not a SPA route.
+RewriteRule ^redeploy\.php$ - [L]
+
+# Prevent rewrite loops once the request is already inside /dist.
+RewriteRule ^dist/ - [L]
+
+# Always serve the built entry file instead of the source root index.html.
+RewriteRule ^index\.html$ dist/index.html [L]
+
+# If the requested path exists inside /dist, serve that built file or directory.
+RewriteCond %{DOCUMENT_ROOT}/dist/$1 -f [OR]
+RewriteCond %{DOCUMENT_ROOT}/dist/$1 -d
+RewriteRule ^(.+)$ dist/$1 [L]
+
+# Root domain should open the built app without exposing /dist in the URL.
+RewriteRule ^$ dist/index.html [L]
+
+# SPA fallback for client-side routes.
+RewriteRule ^ dist/index.html [L]

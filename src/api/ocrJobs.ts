@@ -1,3 +1,5 @@
+import { apiUrl } from './client';
+
 export type OcrJobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'model_missing' | string;
 export type SegmentJobStatus = 'pending' | 'running' | 'segmented' | 'failed' | 'cancelled' | string;
 
@@ -171,7 +173,7 @@ const parseApiError = async (response: Response) => {
 };
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...init,
     headers: {
       ...apiHeaders,
@@ -260,7 +262,7 @@ export const listBookDocuments = async (signal?: AbortSignal) => {
   return payload.data;
 };
 
-export const getOcrJobDocumentUrl = (jobId: number) => `/api/ocr/jobs/${jobId}/document`;
+export const getOcrJobDocumentUrl = (jobId: number) => apiUrl(`/api/ocr/jobs/${jobId}/document`);
 
 export const getOcrJob = async (jobId: number, signal?: AbortSignal) => {
   const payload = await requestJson<OcrJobResponse>(`/api/ocr/jobs/${jobId}`, { signal });
@@ -308,8 +310,8 @@ export const cancelSegmentJob = async (jobId: number) => {
   return payload.data;
 };
 
-export const getSegmentJobDocumentUrl = (jobId: number) => `/api/ocr/segments/${jobId}/document`;
-export const getSegmentJobLineImageUrl = (jobId: number, lineIndex: number) => `/api/ocr/segments/${jobId}/lines/${lineIndex}`;
+export const getSegmentJobDocumentUrl = (jobId: number) => apiUrl(`/api/ocr/segments/${jobId}/document`);
+export const getSegmentJobLineImageUrl = (jobId: number, lineIndex: number) => apiUrl(`/api/ocr/segments/${jobId}/lines/${lineIndex}`);
 
 export const runAdditionalSegmentation = async (jobId: number, signal?: AbortSignal) => {
   const payload = await requestJson<SegmentJobResponse>(

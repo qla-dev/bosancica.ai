@@ -1,3 +1,5 @@
+import { apiUrl } from './client';
+
 export interface ResearcherCorrectionLine {
   line_index: number;
   original_bosancica: string;
@@ -32,7 +34,7 @@ export interface ResearcherCorrection {
 }
 
 export const createResearcherCorrection = async (options: CreateResearcherCorrectionOptions) => {
-  const response = await fetch('/api/researcher-corrections', {
+  const response = await fetch(apiUrl('/api/researcher-corrections'), {
     method: 'POST',
     headers: {
       Accept: 'application/json',

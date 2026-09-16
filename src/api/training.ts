@@ -1,3 +1,5 @@
+import { apiUrl } from './client';
+
 export type DatasetReport = {
   valid: boolean;
   train_samples: number;
@@ -131,7 +133,7 @@ const parseError = async (response: Response) => {
 };
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...init,
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
   });
@@ -188,7 +190,7 @@ export const cancelTraining = async (jobId: string) => {
 };
 
 export const getTrainingArtifactUrl = (jobId: string, artifactId: string) => (
-  `/api/training/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}`
+  apiUrl(`/api/training/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}`)
 );
 
 export const getEscriptoriumStatus = async () => {

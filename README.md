@@ -163,3 +163,22 @@ Example:
 ```bash
 docker push kulasinn/bosancica-ai:bosancica-frontend
 ```
+
+## cPanel frontend redeploy
+
+`redeploy.php` updates the frontend checkout from Git, installs the locked
+dependencies, and rebuilds `dist/` on the cPanel server. It does not deploy or
+restart the backend, queue workers, Docker services, or model services.
+
+The cPanel document root must contain the frontend repository checkout on its
+`main` branch. The account also needs Git, Node.js 20 or newer with npm,
+outbound Git access, and write access to the checkout. Upload `redeploy.php`
+and the root `.htaccess` once, then start a deployment at:
+
+```text
+https://bosancica.ai/redeploy.php
+```
+
+The production build always uses `https://api.bosancica.ai:82` as its API origin.
+Like the NFFIS endpoint, this URL has no authentication; anyone who knows it
+can trigger a frontend deployment. A lock prevents simultaneous deployments.

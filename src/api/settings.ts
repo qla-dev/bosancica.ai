@@ -1,3 +1,5 @@
+import { apiUrl } from './client';
+
 export interface SegmentationRepairSettings {
   enabled: boolean;
   trigger_multiplier: number;
@@ -35,7 +37,7 @@ const parseApiError = async (response: Response) => {
 };
 
 const requestSettings = async (url: string, init?: RequestInit) => {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...init,
     headers: {
       Accept: 'application/json',
