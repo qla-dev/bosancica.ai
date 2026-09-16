@@ -7,7 +7,11 @@ ini_set('memory_limit', '512M');
 ini_set('output_buffering', '0');
 ini_set('zlib.output_compression', '0');
 
-$baseDir = __DIR__;
+$webRoot = __DIR__;
+// The web root contains only the compiled application. Keep the Git checkout
+// one directory above it so source files and .git are never web-accessible.
+$sourceDir = dirname($webRoot).DIRECTORY_SEPARATOR.'.bosancica-frontend-source';
+$repository = 'https://github.com/qla-dev/bosancica.ai.git';
 
 if (PHP_SAPI !== 'cli') {
     header('Content-Type: text/plain; charset=utf-8');
@@ -100,6 +104,45 @@ $run = static function (string $command, string $cwd, callable $write): int {
     return is_int($exitCode) && $exitCode >= 0 ? $exitCode : $closeCode;
 };
 
+$publishDirectory = static function (string $source, string $target, callable $write): void {
+    if (! is_dir($source)) {
+        throw new RuntimeException("Build output was not found: {$source}");
+    }
+
+    if (! is_dir($target) && ! mkdir($target, 0755, true) && ! is_dir($target)) {
+        throw new RuntimeException("Could not create publish directory: {$target}");
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($source, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST,
+    );
+
+    foreach ($iterator as $item) {
+        $relativePath = substr($item->getPathname(), strlen($source) + 1);
+        $destination = $target.DIRECTORY_SEPARATOR.$relativePath;
+
+        if ($item->isDir()) {
+            if (! is_dir($destination) && ! mkdir($destination, 0755, true) && ! is_dir($destination)) {
+                throw new RuntimeException("Could not create directory: {$destination}");
+            }
+
+            continue;
+        }
+
+        $destinationDir = dirname($destination);
+        if (! is_dir($destinationDir) && ! mkdir($destinationDir, 0755, true) && ! is_dir($destinationDir)) {
+            throw new RuntimeException("Could not create directory: {$destinationDir}");
+        }
+
+        if (! copy($item->getPathname(), $destination)) {
+            throw new RuntimeException("Could not publish file: {$relativePath}");
+        }
+    }
+
+    $write("Published build to {$target}.\n");
+};
+
 $npmCandidates = [
     '/opt/cpanel/ea-nodejs24/bin/npm',
     '/opt/cpanel/ea-nodejs22/bin/npm',
@@ -141,18 +184,32 @@ putenv('PATH='.$nodeBinDir.PATH_SEPARATOR.$currentPath);
 putenv('VITE_API_BASE_URL=https://api.bosancica.ai:82');
 $npmCommand = escapeshellarg($npm);
 
-$commands = [
-    ['label' => 'Pulling latest Bosancica frontend code', 'command' => 'git pull --ff-only origin main'],
+$commands = [];
+
+if (is_dir($sourceDir.DIRECTORY_SEPARATOR.'.git')) {
+    $commands[] = [
+        'label' => 'Pulling latest Bosancica frontend code',
+        'command' => 'git fetch --depth=1 origin main && git reset --hard FETCH_HEAD',
+    ];
+} else {
+    $commands[] = [
+        'label' => 'Cloning Bosancica frontend code',
+        'command' => 'git clone --depth=1 --branch main '.escapeshellarg($repository).' '.escapeshellarg($sourceDir),
+        'cwd' => dirname($sourceDir),
+    ];
+}
+
+$commands = array_merge($commands, [
     ['label' => 'Installing frontend dependencies', 'command' => $npmCommand.' ci --no-audit --no-fund'],
     ['label' => 'Building Bosancica frontend', 'command' => $npmCommand.' run build'],
-];
+]);
 
 $startedAt = time();
 
 foreach ($commands as $step) {
     $write("\n=== {$step['label']} ===\n");
     $write("Command: {$step['command']}\n");
-    $exitCode = $run($step['command'], $baseDir, $write);
+    $exitCode = $run($step['command'], $step['cwd'] ?? $sourceDir, $write);
 
     if ($exitCode !== 0) {
         if (PHP_SAPI !== 'cli') {
@@ -161,6 +218,22 @@ foreach ($commands as $step) {
         $write("{$step['label']} failed with exit code {$exitCode}.\n");
         exit($exitCode);
     }
+}
+
+$write("\n=== Publishing Bosancica frontend ===\n");
+
+try {
+    if (! copy($sourceDir.DIRECTORY_SEPARATOR.'.htaccess', $webRoot.DIRECTORY_SEPARATOR.'.htaccess')) {
+        throw new RuntimeException('Could not publish the root .htaccess file.');
+    }
+
+    $publishDirectory($sourceDir.DIRECTORY_SEPARATOR.'dist', $webRoot.DIRECTORY_SEPARATOR.'dist', $write);
+} catch (Throwable $exception) {
+    if (PHP_SAPI !== 'cli') {
+        http_response_code(500);
+    }
+    $write("Publishing failed: {$exception->getMessage()}\n");
+    exit(1);
 }
 
 $write("\nBosancica frontend redeploy completed successfully in ".(time() - $startedAt)."s.\n");
